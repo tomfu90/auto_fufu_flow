@@ -1,0 +1,45 @@
+success_cases:
+  - name: "查询挂单用例01_成功：查询成功"
+    description: "查询挂单成功"
+    mark: "exist"
+    expected:
+      status_code: 200
+      success: True
+
+fail_cases:
+  - name: "查询挂单用例02_失败：挂单号为空"
+    description: "挂单号为空，查询失败"
+    mark: "null_id"
+    expected:
+      status_code: 400
+      error: "缺少 listing_id 参数"
+  - name: "查询挂单用例03_失败：挂单号非整数"
+    description: "挂单号格式错误，查询失败"
+    mark: "no_int"
+    expected:
+      status_code: 400
+      error: "listing_id 必须为整数"
+  - name: "查询挂单用例04_失败：挂单号不存在"
+    description: "挂单号不存在，查询失败"
+    mark: "nonexistent"
+    expected:
+      status_code: 404
+      error: "挂单不存在"
+  - name: "查询挂单用例05_失败：查询非本人挂单"
+    description: "只能查询本人挂单，其他人挂单不能查询"
+    mark: "other"
+    expected:
+      status_code: 403
+      error: "无权查看他人的挂单"
+  - name: "查询挂单用例06_失败：接口请求头缺少token"
+    description: "接口请求头缺少token"
+    mark: "no_token"
+    expected:
+      status_code: 401
+      error: "Invalid or missing token"
+  - name: "查询挂单用例07_失败：接口请求头token无效"
+    description: "接口请求头token无效"
+    mark: "invalid_token"
+    expected:
+      status_code: 401
+      error: "Invalid or missing token"

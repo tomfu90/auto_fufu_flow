@@ -11,17 +11,19 @@ sys.path.insert(0, str(project_dir))
 from libs.logger import log_assertion
 from libs.utils import  load_yaml
 
-def test_get_balance_sucess(config,logged_client,test_users,db_conn):
+def test_get_balance_sucess(config,logged_user_client,test_users,db_conn):
     ''' 查看账户金额'''
     #获取url
     env = config['env']
-    get_balance_url = config['environments'][env]['get_balance_url']
+    get_balance_url = config['environments'][env]['user']['get_balance_url']
     #设置allure请求标题
     allure.dynamic.title("查看账户金额")
     #发起请求
-    # 取第一个有效用户
-    username = test_users['valid_users'][0]['username']
-    resp = logged_client[username].get(get_balance_url)
+    # 获取有效用户,第一个默认角色用户
+    user_creds = test_users['valid_user_users']
+    user_cred = next(user for user in user_creds if user['role'] == "default")
+    username = user_cred['username']
+    resp = logged_user_client[username].get(get_balance_url)
     with allure.step("校验响应状态码"):
         actual_value = resp.status_code
         expected_value = 200
@@ -38,16 +40,18 @@ def test_get_balance_sucess(config,logged_client,test_users,db_conn):
         assert actual_value == expected_value, f"接口响应:{actual_value},数据库：{expected_value}"
 
 
-def test_get_transactions_sucess(config,logged_client,test_users,db_conn):
+def test_get_transactions_sucess(config,logged_user_client,test_users,db_conn):
     '''查看交易流水'''
     env = config['env']
-    get_transactions_url = config['environments'][env]['get_transactions_url']
+    get_transactions_url = config['environments'][env]['user']['get_transactions_url']
     # 设置allure请求标题
     allure.dynamic.title("查看交易流水")
-    # 取第一个有效用户
-    username = test_users['valid_users'][0]['username']
+    # 获取有效用户,第一个默认角色用户
+    user_creds = test_users['valid_user_users']
+    user_cred = next(user for user in user_creds if user['role'] == "default")
+    username = user_cred['username']
     # 发起请求
-    resp = logged_client[username].get(get_transactions_url)
+    resp = logged_user_client[username].get(get_transactions_url)
     with allure.step("校验响应状态码"):
         actual_value = resp.status_code
         expected_value = 200
@@ -66,21 +70,23 @@ def test_get_transactions_sucess(config,logged_client,test_users,db_conn):
         log_assertion("查看交易流水", actual_value == expected_value, actual_value, expected_value)
         assert actual_value == expected_value, f"实际：{actual_value} 期望：{expected_value}"
 
-def test_get_order_sucess(config,logged_client,test_users,db_conn):
+def test_get_order_sucess(config,logged_user_client,test_users,db_conn):
     '''查看订单记录：有记录；要先创建订单，才能查询订单'''
     env = config['env']
     #获取创建订单接口
-    create_api_orders_url = config['environments'][env]['create_api_orders_url']
+    create_api_orders_url = config['environments'][env]['user']['create_api_orders_url']
     #获取查询订单接口url，需要传入动态参数
-    get_order_url_template = config['environments'][env]['get_order_url']
-    # 取第一个有效用户
-    username = test_users['valid_users'][0]['username']
+    get_order_url_template = config['environments'][env]['user']['get_order_url']
+    # 获取有效用户,第一个默认角色用户
+    user_creds = test_users['valid_user_users']
+    user_cred = next(user for user in user_creds if user['role'] == "default")
+    username = user_cred['username']
     #取第一个有效订单创建数据:create_order_success.yaml
     datas = load_yaml( 'data/order/create_order_success.yaml')['test_cases'][0]
     data = datas['input']
     # 创建订单请求数据
     # 发起创建订单请求
-    resp1 = logged_client[username].post(create_api_orders_url, json=data)
+    resp1 = logged_user_client[username].post(create_api_orders_url, json=data)
     #断言创建订单请求成功
     with allure.step("校验状态码"):
         actual_value = resp1.status_code
@@ -97,7 +103,7 @@ def test_get_order_sucess(config,logged_client,test_users,db_conn):
     # 获取查询订单-完整url-传入创建订单的订单id
     get_order_url = get_order_url_template.format(order_id=order_id)
     # 发起查看交易流水请求
-    resp2 = logged_client[username].get(get_order_url)
+    resp2 = logged_user_client[username].get(get_order_url)
     with allure.step("校验状态码"):
         actual_value = resp2.status_code
         expected_value = 200
@@ -121,16 +127,18 @@ def test_get_order_sucess(config,logged_client,test_users,db_conn):
 
 
 
-def test_get_order_fail_404(config,logged_client,test_users):
+def test_get_order_fail_404(config,logged_user_client,test_users):
     '''查看订单记录：无记录'''
     env = config['env']
     #获取配置url，需要传入动态参数
-    get_order_url_template = config['environments'][env]['get_order_url']
+    get_order_url_template = config['environments'][env]['user']['get_order_url']
     order_id = random.randint(1000, 9999) #动态参数
-    # 取第一个有效用户
-    username = test_users['valid_users'][0]['username']
+    # 获取有效用户,第一个默认角色用户
+    user_creds = test_users['valid_user_users']
+    user_cred = next(user for user in user_creds if user['role'] == "default")
+    username = user_cred['username']
     get_order_url = get_order_url_template.format(order_id=order_id) #获取完整url
-    resp = logged_client[username].get(get_order_url)
+    resp = logged_user_client[username].get(get_order_url)
     with allure.step("校验状态码"):
         assert resp.status_code == 404,f"实际:{resp.status_code},预期：404"
 

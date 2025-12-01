@@ -1,13 +1,26 @@
 # data/test_users.yaml
-#有效用户
-valid_users:
-  - username: "tester"
+# 支持按不同系统 不同角色配置多种登陆用户
+#有效用户-用户端 ：支持按角色构造批量用户
+valid_user_users:
+  - role: "default"  #用户端主要是这个用户操作
+    username: "tester"
     password: "SecurePass123!"
-  - username: "admin"
+  - role: "sell"    # 用户端 操作买卖，卖的用户；default对应买的用户
+    username: "admin"
     password: "AdminPass456!"
 
-#无效用户
-invalid_users:
+#有效用户-后台：支持按角色构造批量用户，这个框架权限暂时设计了admin权限角色 + NORMAL 普通权限
+valid_back_users:
+  - role: "ADMIN"
+    username: "HOUTAIMIN"
+    password: "123A"
+  - role: "NORMAL"
+    username: "XIXI"
+    password: "123AA"
+
+
+#无效用户-用户端
+invalid_user_users:
 
   - name: "无效登陆01:用户名密码都错误"
     input:

@@ -1,0 +1,94 @@
+success_cases:
+  - name: "后台更新用户余额用例01_成功：更新成功_增加"
+    description: "增加用户金额成功"
+    input:
+      amount: 100
+      mark: "add"
+    expected:
+      status_code: 200
+      success: True
+      adjustment: 100
+  - name: "后台更新用户余额用例02_成功：更新成功_减少"
+    description: "扣减用户金额成功"
+    input:
+      amount: -50
+      mark: "sub"
+    expected:
+      status_code: 200
+      success: True
+      adjustment: -50
+fail_cases:
+  - name: "后台更新用户余额用例03_失败：username为空"
+    description: "username为空更新余额失败"
+    input:
+      amount: 100
+      mark: "null_username"
+    expected:
+      status_code: 400
+      error: "username 不能为空"
+  - name: "后台更新用户余额用例04_失败：用户不存在"
+    description: "用户不存在更新余额失败"
+    input:
+      amount: 100
+      mark: "nonexist_username"
+    expected:
+      status_code: 404
+      error: "用户不存在"
+  - name: "后台更新用户余额用例05_失败：amount为空"
+    description: "amount为空更新余额失败"
+    input:
+      amount: null
+      mark: "add"
+    expected:
+      status_code: 400
+      error: "amount 不能为空"
+  - name: "后台更新用户余额用例06_失败：amount为0"
+    description: "amount为0更新余额失败"
+    input:
+      amount: 0
+      mark: "add"
+    expected:
+      status_code: 400
+      error: "amount 不能为 0"
+  - name: "后台更新用户余额用例07_失败：amount为非数字"
+    description: "amount为非数字更新余额失败"
+    input:
+      amount: "abc"
+      mark: "add"
+    expected:
+      status_code: 400
+      error: "amount 必须为有效数字"
+  - name: "后台更新用户余额用例08_失败：amount为多位小数"
+    description: "amount为多位小数更新余额失败"
+    input:
+      amount: 100.111
+      mark: "add"
+    expected:
+      status_code: 400
+      error: "amount 最多保留 2 位小数"
+  - name: "后台更新用户余额用例09_失败：扣减用户金额，将用户余额变为负数"
+    description: "扣减用户金额，将用户余额变为负数"
+    input:
+      amount: -500
+      mark: "sub"
+    expected:
+      status_code: 400
+      error: "操作后余额不能为负"
+  - name: "后台更新用户余额用例10_失败：无权限 增加用户余额"
+    description: "非admin角色管理员 更新余额_增加失败"
+    input:
+      amount: 10
+      mark: "add_no_permit"
+    expected:
+      status_code: 403
+      error: "Insufficient permissions"
+  - name: "后台更新用户余额用例11_失败：无权限减少用户余额"
+    description: "非admin角色管理员 更新余额_减少失败"
+    input:
+      amount: 10
+      mark: "sub_no_permit"
+    expected:
+      status_code: 403
+      error: "Insufficient permissions"
+
+

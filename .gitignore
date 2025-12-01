@@ -56,3 +56,10 @@ mock_server/uploads/
 
 # Flask instance directory (runtime data)
 instance/
+
+#敏感信息
+set_env.sh
+
+# 运行时生成的目录（你的项目里的logs/report/data）
+logs/          # 忽略整个日志目录（比只忽略*.log更彻底）
+report/        # 忽略整个报告目录（运行时生成的报告无需提交）

@@ -1,0 +1,71 @@
+test_cases:
+  success_cases: #成功用例
+    - name: "创建挂单01_创建成功：cny挂单"
+      input:
+        product_id: "A1B3"
+        amount: 100
+        currency: "CNY"
+      expected:
+        status_code: 201
+        amount: 100
+        product_id: "A1B3"
+    - name: "创建挂单02_创建成功：USD挂单"
+      input:
+        product_id: "A1B4"
+        amount: 100.55
+        currency: "USD"
+      expected:
+        status_code: 201
+        amount: 100.55
+        product_id: "A1B4"
+
+  fail_cases: #失败用例
+    - name: "创建挂单03_创建失败：product_id为空"
+      input:
+        product_id: null
+        amount: 100.55
+        currency: "USD"
+      expected:
+        status_code: 400
+        error: "Invalid product_id"
+    - name: "创建挂单04_创建失败：product_id长度小于2"
+      input:
+        product_id: "a"
+        amount: 100.55
+        currency: "USD"
+      expected:
+        status_code: 400
+        error: "Invalid product_id"
+    - name: "创建挂单05_创建失败：product_id长度大于9"
+      input:
+        product_id: "abcd1234567890"
+        amount: 100.55
+        currency: "USD"
+      expected:
+        status_code: 400
+        error: "Invalid product_id"
+    - name: "创建挂单06_创建失败：amount不为数字"
+      input:
+        product_id: "abcd123"
+        amount: "abc"
+        currency: "USD"
+      expected:
+        status_code: 400
+        error: "Invalid amount"
+    - name: "创建挂单07_创建失败：amount小于0"
+      input:
+        product_id: "abcd123"
+        amount: -1
+        currency: "USD"
+      expected:
+        status_code: 400
+        error: "Invalid amount"
+    - name: "创建挂单08_创建失败：currency错误"
+      input:
+        product_id: "abcd123"
+        amount: 100
+        currency: "USD1"
+      expected:
+        status_code: 400
+        error: "Invalid currency"
+

@@ -22,24 +22,47 @@ class Apiclient:
 
     def _request(self, method, path, **kwargs):
         url = self.base_url + path  # 拼接完整请求
-        headers = dict(self.session.headers) # 获取会话请求头
-        body = kwargs.get("json") or {} #请求体请求详情，不是json格式，就默认空字典
+        # 1. 从 session 获取默认 headers（如 Authorization）
+        base_headers = dict(self.session.headers) # 获取会话请求头
+        # 2. 合并本次请求传入的 headers（如 X-Signature）
+        if "headers" in kwargs:
+            actual_headers = {**base_headers, **kwargs["headers"]}
+        # 3 如果请求中没有设置请求头，启用默认请求头
+        else:
+            actual_headers = base_headers
+        if "json" in kwargs:
+            body = kwargs["json"]
+        elif "data" in kwargs:
+            raw_data = kwargs["data"]
+            if isinstance(raw_data, dict):
+                body = raw_data
+            elif isinstance(raw_data, str):
+                try:
+                    body = json.loads(raw_data)
+                except (json.JSONDecodeError, TypeError):
+                    body = raw_data
+            else:
+                body = str(raw_data)
+        else:
+            body = {}
         files = kwargs.get("files") or {}
         #构造请求摘要，用于allure和log日志记录
         req_summary = f"{method} {url}"
         req_info =(
             f"URL: {url}\n"
             f"Method: {method}\n"
-            f"Headers: {json.dumps(headers,indent=2,ensure_ascii=False)}\n"
+            f"Headers: {json.dumps(actual_headers,indent=2,ensure_ascii=False)}\n"
             f"Body:{json.dumps(body,indent=2,ensure_ascii=False) if body else 'None'}" # 将python字典格式转为json格式传递
 
         )
         try:
             with allure.step(f'发送请求:{req_summary}'):
                 allure.attach(req_info, "请求详情", attachment_type=allure.attachment_type.TEXT)
-
+            # 如果 kwargs 中没有 timeout，则默认设为 15
+            if "timeout" not in kwargs:
+                kwargs["timeout"] = 15
             # 发起请求
-            response = self.session.request(method, url, timeout=15, **kwargs)
+            response = self.session.request(method, url, **kwargs)
             # 成功处理响应
             try:
                 resp_data = response.json()
@@ -50,7 +73,7 @@ class Apiclient:
             with allure.step(f"响应：{response.status_code}"):
                 allure.attach(resp_text, "响应详情", allure.attachment_type.JSON if resp_data else allure.attachment_type.TEXT)
             #记录成功业务日志
-            log_test_action(action="api_request_success", details=f"Status={response.status_code} | URL={url} | Request={body}| Response={resp_data if resp_data else "non-json"}")
+            log_test_action(action="api_request_success", details=f"URL={url} |Status={response.status_code}| Headers={actual_headers} ｜Method={method}| URL={url} | Request={body}| Response={resp_data if resp_data else "non-json"}")
 
             return response
         except requests.exceptions.RequestException as e:
@@ -63,11 +86,11 @@ class Apiclient:
                 allure.attach(error_msg,"错误信息", attachment_type=allure.attachment_type.TEXT)
                 allure.attach(full_traceback, "堆栈信息", attachment_type=allure.attachment_type.TEXT)
             #业务日志记录异常
-            log_test_action(action='api_request_failed', details=f"URL={url} | Method={method}| Request={body}|Error={error_msg}")
+            log_test_action(action='api_request_failed', details=f"URL={url} | Headers={actual_headers} | Method={method}| Request={body}|Error={error_msg}")
             raise
         except Exception as e:
             # 兜底异常
-            log_test_action(action='api_request_error',details=f"URL={url} | Request={body}|Error={str(e)} | Trace={traceback.format_exc()}")
+            log_test_action(action='api_request_error',details=f"URL={url} | Headers={actual_headers} | Method={method}| Request={body}|Error={str(e)} | Trace={traceback.format_exc()}")
             raise
 
 

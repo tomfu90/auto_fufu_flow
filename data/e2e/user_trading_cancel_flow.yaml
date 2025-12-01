@@ -1,0 +1,125 @@
+name: "用户交易-模拟完整C2C：审核失败（有下单ecdsa签名方法）"
+description: "出售用户注册->出售用户登陆->后台管理员登陆->给出售用户加钱（模拟充值）->出售用户挂单->购买用户注册->购买用户登陆->用户购买下单(ecdsa签名)->管理员审核拒绝撮合订单->查询余额与挂单"
+
+steps:
+  # === 卖家流程 ===
+  - name: "1 出售用户注册：动态注册"
+    action: register
+    input:
+      username: "{{random_username}}"
+      password: "abc12345"
+      confirm_password: "abc12345"
+      phone: "{{random_phone}}"
+      email: "{{random_email}}"
+    save_as: seller_reg
+
+  - name: "2 出售用户登陆"
+    action: login
+    input:
+      username: "{{seller_reg.username}}"
+      password: "abc12345"
+    save_as: seller_auth
+
+  # === 管理员登录 ===
+  - name: "3 admin管理员后台登陆"
+    action: admin_login
+    input:
+      username: "HOUTAIMIN"
+      password: "123A"
+    save_as: admin_auth
+
+  # === 给卖家充值 ===
+  - name: "4 后台给出售用户充值"
+    action: admin_add_balance
+    input:
+      as_admin: "HOUTAIMIN"
+      username: "{{seller_reg.username}}"
+      amount: 200
+
+  # === 买家流程 ===
+  - name: "5 购买用户注册：动态注册"
+    action: register
+    input:
+      username: "{{random_username}}"
+      password: "abc12345"
+      confirm_password: "abc12345"
+      phone: "{{random_phone}}"
+      email: "{{random_email}}"
+    save_as: buyer_reg
+
+  - name: "6 购买用户登陆"
+    action: login
+    input:
+      username: "{{buyer_reg.username}}"
+      password: "abc12345"
+    save_as: buyer_auth
+
+  # === 卖家挂单 ===
+  - name: "7 出售用户创建挂单"
+    action: create_listing
+    input:
+      as_user: "{{seller_reg.username}}"
+      product_id: BTC
+      amount: 100
+      currency: CNY
+    save_as: listing
+
+  # === 买家下单 ===
+  - name: "8 购买用户购买挂单_ecdsa签名"
+    action: purchase_listing
+    query_params:
+        version: "v1"
+        page: 1
+    signature:
+      secret: "{{en.ecdsa_SECRET}}"
+    input:
+      as_user: "{{buyer_reg.username}}"
+      listing_id: "{{listing.listing_id}}"
+      purchase_amount: 100
+    save_as: order
+
+  # === 管理员审批 ===
+  - name: "9 后台审批订单"
+    action: reject_order
+    input:
+      as_admin: "HOUTAIMIN"
+      order_id: "{{order.order_id}}"
+      action: reject
+
+  # === 数据库验证：卖家余额减少 ===
+  # 卖家系统先新增200，后挂单100出售取消，最终变为200
+  - name: "10 db验证：出售用户余额"
+    action: assert_db
+    input:
+      query: "SELECT balance FROM accounts WHERE username = ?"
+      params: ["{{seller_reg.username}}"]
+      expected:
+        balance: 200
+
+  # === 数据库验证：买家余额增加 ===
+  - name: "11 db验证：购买用户余额"
+    action: assert_db
+    input:
+      query: "SELECT balance FROM accounts WHERE username = ?"
+      params: ["{{buyer_reg.username}}"]
+      expected:
+        balance: 0
+
+  # === 查询挂单详情 ===
+  - name: "12 出售用户查询挂单详情"
+    action: search_listing
+    input:
+      as_user: "{{seller_reg.username}}"
+      listing_id: "{{listing.listing_id}}"
+
+  # === 查询余额 ===
+  - name: "13 购买用户查询余额"
+    action: search_balance
+    input:
+      as_user: "{{buyer_reg.username}}"
+
+  - name: "14 出售用户查询余额"
+    action: search_balance
+    input:
+      as_user: "{{seller_reg.username}}"
+

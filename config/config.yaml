@@ -1,16 +1,36 @@
 # 当前使用的环境（dev/prod）
 env: dev
 
-#不同环境配置
+#不同环境配置 -支持按环境 按不同系统配置url
 environments:
   dev:
-    base_url: http://127.0.0.1:5000
-    login_url: /api/login
-    get_balance_url: /api/account/balance
-    get_transactions_url: /api/account/transactions
-    #动态传参：{order_id}
-    get_order_url: /api/orders/{order_id}
-    create_api_orders_url: /api/orders
-    upload_file_url: /api/upload
-    list_uploads_url: /api/GetUploads
-    register_url: /api/register
+    #用户端接口
+    user:
+      base_url: http://127.0.0.1:5000
+      register_url: /api/register
+      login_url: /api/login #用户端登陆
+      get_balance_url: /api/account/balance
+      get_transactions_url: /api/account/transactions
+      get_order_url: /api/orders/{order_id} # 动态传参：{order_id}
+      get_listing_url: /api/listing
+      upload_file_url: /api/upload
+      list_uploads_url: /api/GetUploads
+      create_api_orders_url: /api/orders
+      create_order_md5_url: /api/v1/md5/order
+      create_order_hmac_url: /api/v1/hmac/order
+      create_order_ecdsa_url: /api/v1/ecdsa/order
+      create_purchase_order_ecdsa_url: /api/purchase/create/ecdsa
+      create_listing_url: /api/listing/create
+      create_purchase_order_url: /api/purchase/create
+      cancel_listing_url: /api/listing/cancel
+
+    #后台系统接口
+    back:
+      base_url: http://127.0.0.1:5000 #后台登陆，后台和用户端 base_url相同；实际项目base_url不同
+      login_url: /api/admin/login
+      review_purchase_order_url: /api/admin/review_purchase
+      admin_update_balance_url: /api/admin/update_balance
+
+
+
+

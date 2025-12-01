@@ -15,7 +15,8 @@ logger.setLevel(logging.INFO) #	只记录INFO及以上级别（DEBUG信息会被
 
 if not logger.handlers:
     log_file = log_dir/ "test.log"
-    handler = logging.FileHandler( str(log_file) ,encoding="utf-8")
+    #  mode='w' 实现覆盖写入 ，默认 mode='a' 追加
+    handler = logging.FileHandler( str(log_file) ,mode='w',encoding="utf-8")
     formatter = logging.Formatter('%(asctime)s  - %(levelname)s - %(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)

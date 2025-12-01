@@ -26,10 +26,11 @@ def test_login_success(config,test_users,db_conn):
     allure.dynamic.title("登陆成功")
     #获取url
     env = config['env']
-    base_url = config['environments'][env]['base_url']
-    login_url = config['environments'][env]['login_url']
-    #获取有效用户,配置表第一个
-    user_cred = test_users['valid_users'][0]
+    base_url = config['environments'][env]['user']['base_url']
+    login_url = config['environments'][env]['user']['login_url']
+    #获取有效用户,第一个默认角色用户
+    user_creds = test_users['valid_user_users']
+    user_cred =next(user for user in user_creds if user['role'] == "default")
     #发起请求，先创建会话实例
     client = api_client.Apiclient(base_url)
     # 发起登陆请求
@@ -43,9 +44,8 @@ def test_login_success(config,test_users,db_conn):
         assert row['token'] == token,f"响应token:{token}，数据库token:{row['token']}"
 
 #读取无效用户数据
-DATA_PATH = Path(__file__).parent.parent / 'data' / 'login'/'test_users.yaml'
-users= load_yaml(DATA_PATH)
-_invalid_users=users['invalid_users']
+users= load_yaml('data/login/test_users.yaml')
+_invalid_users=users['invalid_user_users']
 
 @pytest.mark.parametrize('login_fail_case', _invalid_users)
 def test_login_fail(config, login_fail_case):
@@ -55,8 +55,8 @@ def test_login_fail(config, login_fail_case):
     allure.dynamic.title(login_fail_case['name'])
     #获取url
     env = config['env']
-    base_url = config['environments'][env]['base_url']
-    login_url = config['environments'][env]['login_url']
+    base_url = config['environments'][env]['user']['base_url']
+    login_url = config['environments'][env]['user']['login_url']
     # 获取用户数据
     user_info = login_fail_case['input']
     # 发起请求，先创建会话实例
@@ -77,5 +77,5 @@ def test_login_fail(config, login_fail_case):
 
 
 
-# if __name__ == '__main__':
-#     pytest.main(['--vs'])
+if __name__ == '__main__':
+    pytest.main(['--vs'])

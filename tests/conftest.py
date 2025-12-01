@@ -30,6 +30,7 @@ def db_conn():
     conn.close()
 
 
+
 # mock_app 服务是否启动 检查，检查/health接口
 mock_server_process = None
 @pytest.fixture(scope='session',autouse=True)
@@ -76,16 +77,63 @@ def test_users():
     return load_yaml(DATA_PATH)
 
 
+
+@pytest.fixture(scope='session')
+def default_user(test_users):
+    """
+    封装默认的客户端用户，role:default
+     获取有效用户,第一个默认角色用户
+    """
+    user_creds = test_users['valid_user_users']
+    user_cred = next(user for user in user_creds if user['role'] == "default")
+    username = user_cred['username']
+    return username
+
+@pytest.fixture(scope='session')
+def sell_user(test_users):
+    """
+    封装默认的sell用户，role:sell
+    获取有效用户,第一个默认角色用户
+    """
+    user_creds = test_users['valid_user_users']
+    user_cred = next(user for user in user_creds if user['role'] == "sell")
+    username = user_cred['username']
+    return username
+
+
+@pytest.fixture(scope='session')
+def back_normal_user(test_users):
+    """
+    封装普通后台用户，role:normal
+    获取有效用户,第一个默认角色用户
+    """
+    user_creds = test_users['valid_back_users']
+    user_cred = next(user for user in user_creds if user['role'] == "NORMAL")
+    username = user_cred['username']
+    return username
+
+@pytest.fixture(scope='session')
+def back_admin_user(test_users):
+    """
+    封装默认的后台管理员用户，role:admin
+    获取有效用户,第一个默认角色用户
+    """
+    user_creds = test_users['valid_back_users']
+    user_cred = next(user for user in user_creds if user['role'] == "ADMIN")
+    username = user_cred['username']
+    return username
+
+
 @pytest.fixture(scope='module')
-def logged_client(config,test_users):
-    """创建已登陆的客户端"""
+def logged_user_client(config,test_users):
+    """创建已登陆的前端用户客户端"""
     env = config['env']
-    base_url = config['environments'][env]['base_url']
-    login_url = config['environments'][env]['login_url']
+    base_url = config['environments'][env]['user']['base_url']
+    login_url = config['environments'][env]['user']['login_url']
     #保存多个已登陆用户客户端client
     clients ={}
     #读取用户
-    users = test_users['valid_users']
+    users = test_users['valid_user_users']
     for user in users:
         username = user['username']
         # 创建客户端
@@ -96,10 +144,35 @@ def logged_client(config,test_users):
         token = resp['access_token']
         # 设置全局认证头
         client.session.headers.update({"Authorization": f"Bearer {token}"})
+        client._username = username
         clients[username] = client
 
     return clients
 
+@pytest.fixture(scope='module')
+def logged_back_client(config,test_users):
+    """创建已登陆的后台管理系统客户端"""
+    env = config['env']
+    base_url = config['environments'][env]['back']['base_url']
+    login_url = config['environments'][env]['back']['login_url']
+    #保存多个已登陆用户客户端client
+    clients ={}
+    #读取用户
+    users = test_users['valid_back_users']
+    for user in users:
+        username = user['username']
+        # 创建客户端
+        client = Apiclient(base_url=base_url)
+        response = client.post(login_url, json=user)
+        assert response.status_code == 200, f"{username}登陆失败：{response.text}"
+        resp = response.json()
+        token = resp['access_token']
+        # 设置全局认证头
+        client.session.headers.update({"Authorization": f"Bearer {token}"})
+        client._username = username
+        clients[username] = client
+
+    return clients
 
 _start_time = None
 def pytest_sessionstart(session):

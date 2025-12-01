@@ -14,7 +14,7 @@ root_dir = Path(__file__).parent.parent
 if str(root_dir) not in sys.path:
     sys.path.insert(0,str(root_dir))
 
-from libs.random_utils import generate_random_username
+from libs.random_utils import generate_random_username,generate_random_email,generate_random_phone
 
 def load_yaml(filepath: str):
     '''
@@ -31,10 +31,13 @@ def load_yaml(filepath: str):
     with open(full_path, 'r', encoding='utf-8') as f:
         return  yaml.safe_load(f)
 
+
 def render_placeholders(obj, context):
     """
-    递归替换所有 {{key}} 为 context[key]
-    支持 dict / list / str 嵌套结构
+    递归替换数据中的占位符： 3种形式
+      - {{key}} → 来自 context（如 random_username）
+      - {{key1.key2}}  → 来自 context 嵌套上下文（如 sell.username）
+      - ${en.key} → 来自 context  获取的环境变量，前缀en.
     """
     if isinstance(obj, dict):
         return {k: render_placeholders(v, context) for k, v in obj.items()}
@@ -42,12 +45,20 @@ def render_placeholders(obj, context):
         return [render_placeholders(item, context) for item in obj]
     elif isinstance(obj, str):
         def replace_match(match):
-            key = match.group(1)
-            if key in context:
-                return str(context[key])
-            else:
-                raise KeyError(f"占位符 '{{{key}}}' 未在 context 中定义！")
-        return re.sub(r"\{\{(\w+)\}\}", replace_match, obj)
+            path = match.group(1)  # 如 "buyer_reg.username"
+            keys = path.split('.')  # ['buyer_reg', 'username']
+            value = context
+            try:
+                for key in keys:
+                    if isinstance(value, dict) and key in value:
+                        value = value[key]
+                    else:
+                        raise KeyError(f"路径 '{path}' 中的键 '{key}' 未找到")
+                return str(value)
+            except (KeyError, TypeError) as e:
+                raise KeyError(f"占位符 '{{{{{path}}}}}' 解析失败: {e}")
+        # 允许占位符包含字母、数字、下划线、点号
+        return re.sub(r"\{\{([a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*)\}\}", replace_match, obj)
     else:
         return obj
 
@@ -58,15 +69,32 @@ def load_test_cases(yaml_path):
     返回渲染后的 Python 对象
     """
     raw_data = load_yaml(yaml_path)
-    # 准备动态上下文（可扩展）
-    context = {
-        "random_username": generate_random_username(),
-       # "random_email": generate_random_username() + "@test.com",
-       # "timestamp": datetime.now().strftime("%Y%m%d%H%M%S"),
-    }
+    # 第2步：准备一个空字典，用于存放渲染后的结果
+    rendered = {}
+    # 第3步：分别处理两个关键部分：成功用例 和 失败用例
+    for section in ['success_cases', 'fail_cases']:
+        if section in raw_data:
+            # 初始化该部分的列表（例如 rendered['fail_register'] = []）
+            rendered[section] = []
+            # 第4步：遍历该部分下的每一个测试用例（case）
+            for case in raw_data[section]:
+                # 为当前这个 case 单独生成一组新的随机值
+                context = {
+                    "random_username": generate_random_username(),  # 比如 "auo9xk2m"
+                    "random_email": generate_random_email(),  # 比如 "auo123abc@test.com"
+                    "random_phone": generate_random_phone()  # 比如 "13812345678"
+                }
+                # 第5步：用这一组 context 去渲染当前 case 的所有字段
+                rendered_case = render_placeholders(case, context)
+                # 第6步：把渲染好的 case 加入结果列表
+                rendered[section].append(rendered_case)
+        else:
+            # 如果 YAML 中没有这个 section（比如漏写了），就设为空列表，避免报错
+            rendered[section] = []
 
-    # 渲染整个 YAML 结构（直接递归处理根对象，更简洁）
-    return render_placeholders(raw_data, context)
+    # 第7步：返回最终结构：{ "success_register": [...], "fail_register": [...] }
+    return rendered
+
 
 if __name__ == '__main__':
     print(load_test_cases("data/login/test_register.yaml"))

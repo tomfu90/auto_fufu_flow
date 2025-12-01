@@ -1,0 +1,36 @@
+test_cases:
+  success_cases: #成功用例
+    - name: "取消挂单01_取消成功"
+      description: "取消挂单中挂单->200"
+      mark: "active" # 挂单中挂单存在
+      expected:
+        status_code: 200
+        message: "Listing canceled successfully"
+        status: "CANCELLED"
+
+  fail_cases: #失败用例
+    - name: "取消挂单02_取消失败：挂单id不存在"
+      description: "挂单id实际不存在，取消挂单失败->404"
+      mark: "empty" #挂单id不存在
+      expected:
+        status_code: 404
+        error: "Listing not found"
+    - name: "取消挂单03_取消失败：挂单状态非挂单中（已取消），取消失败"
+      description: "挂单状态已取消，再次进行取消: 1先创建挂单，2取消成功，3第二次再取消，取消失败->400"
+      mark: "canceled" #已取消挂单
+      expected:
+        status_code: 400
+        error: "Only LISTED listings can be canceled"
+    - name: "取消挂单04_取消失败：挂单状态非挂单中（已完成），取消失败"
+      description: "挂单状态已出售完成，进行取消: 1先创建挂单，2被其他用户购买，3后台管理员审核通过，4最后进行取消，取消失败->400"
+      mark: "sold" #已出售挂单
+      expected:
+        status_code: 400
+        error: "Only LISTED listings can be canceled"
+    - name: "取消挂单05_取消失败：取消他人挂单"
+      description: "对其他人发布挂单，进行取消: 1其他人先创建挂单，2当前用户进行取消，取消失败->403"
+      mark: "other" #取消他人挂单
+      expected:
+        status_code: 403
+        error: "You can only cancel your own listing"
+

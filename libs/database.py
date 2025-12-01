@@ -17,13 +17,17 @@ def get_db_connection():
     return conn
 
 def init_db():
+
+
     with get_db_connection() as conn:
         #1 用户表uers
         conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
-            username TEXT PRIMARY KEY,
-            password TEXT NOT NULL,
-            created_at TEXT NOT NULL
+                username TEXT PRIMARY KEY,
+                password TEXT NOT NULL,
+                phone TEXT UNIQUE,          
+                email TEXT UNIQUE,          
+                created_at TEXT NOT NULL
             )
         """)
         conn.execute("insert or ignore into users (username, password,created_at) values ('tester', 'SecurePass123!','2025-09-12 10:11:42.556733')")
@@ -97,10 +101,75 @@ def init_db():
                         token TEXT PRIMARY KEY,
                         username TEXT NOT NULL,
                         created_at TEXT NOT NULL,
-                        expires_at TEXT NOT NULL,
-                        FOREIGN KEY(username) REFERENCES users(username)
+                        expires_at TEXT NOT NULL
                     )
                 ''')
+        # api_keys
+        conn.execute('''
+                    CREATE TABLE IF NOT EXISTS api_keys (
+                        key_id TEXT PRIMARY KEY,
+                        secret TEXT NOT NULL,
+                        username TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        is_active BOOLEAN DEFAULT 1,
+                        FOREIGN KEY(username) REFERENCES users(username) 
+                    )
+                ''')
+        conn.execute(
+            "insert or ignore into api_keys (key_id, secret, username, created_at) VALUES ('abc123', 'SuperSecretKey456!', 'tester', '2025-09-12 10:11:42.556733')")
+        # =============== 新增：挂单、购买、审核相关表 ===============
+
+        # 8. 挂单表（卖家发布）
+        conn.execute('''
+                    CREATE TABLE IF NOT EXISTS listings (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        seller_username TEXT NOT NULL,
+                        product_id TEXT NOT NULL,
+                        amount REAL NOT NULL,
+                        currency TEXT NOT NULL CHECK (currency IN ('CNY', 'USD')),
+                        status TEXT DEFAULT 'LISTED' CHECK (status IN ('LISTED', 'SOLD', 'CANCELLED')),
+                        created_at TEXT NOT NULL,
+                        sold_at TEXT,
+                        FOREIGN KEY(seller_username) REFERENCES users(username)
+                    )
+                ''')
+
+
+        # 9. 购买订单表（买家对挂单的购买请求）
+        conn.execute('''
+                    CREATE TABLE IF NOT EXISTS purchase_orders (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        listing_id INTEGER NOT NULL,
+                        buyer_username TEXT NOT NULL,
+                        amount REAL NOT NULL,          -- 应等于 listing.amount
+                        currency TEXT NOT NULL,
+                        status TEXT DEFAULT 'PENDING_REVIEW' CHECK (status IN ('PENDING_REVIEW', 'COMPLETED', 'REJECTED', 'CANCELLED')),
+                        created_at TEXT NOT NULL,
+                        reviewed_at TEXT,
+                        reviewed_by TEXT,              -- 审核人（通常是 admin）
+                        review_action TEXT,            -- 'approve' / 'reject'
+                        FOREIGN KEY(listing_id) REFERENCES listings(id) ON DELETE CASCADE,
+                        FOREIGN KEY(buyer_username) REFERENCES users(username)
+                    )
+                ''')
+
+        # 10. （可选）后台管理员角色标记 —— 这里我们不单独建表，而是通过用户名判断（如 'admin'）
+        #     如果未来需要多管理员，可建 admin_users 表，但目前用 'admin' 用户即可
+
+        conn.execute('''CREATE TABLE IF NOT EXISTS admins (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    password TEXT NOT NULL,
+                    role TEXT NOT NULL
+        )''')
+        # 可选：插入一条测试挂单（用于接口调试）
+        conn.execute('''
+            INSERT OR IGNORE INTO admins (username,password,role) VALUES (?,?,?)
+        ''', ('HOUTAIMIN', '123A',"ADMIN"))
+        conn.execute('''
+                    INSERT OR IGNORE INTO admins (username,password,role) VALUES (?,?,?)
+                ''', ('XIXI', '123AA', "NORMAL"))
+
 
 
 

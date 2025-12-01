@@ -1,0 +1,116 @@
+# data/order/test_create_purchase_order.yaml
+test_cases:
+  # mark 代表场景标志位：1 exist-代表挂单存在2 null_id 代表挂单为空 3 nonexistent 代表挂单不存在
+  # 4 canceled 代表挂单已取消 5 complete 代表挂单已完成
+  success_cases:
+    - name: "后台审核撮合订单 01_成功：审核通过"
+      description: "管理员审核通过"
+      input:
+        action: "approve"
+        mark: "exist"
+      expected:
+        status_code: 200
+        action: "approve"
+        status: "COMPLETED"
+
+    - name: "后台审核撮合订单 02_成功：审核拒绝"
+      description: "管理员审核拒绝"
+      input:
+        action: "reject"
+        mark: "exist"
+      expected:
+        status_code: 200
+        action: "reject"
+        status: "REJECTED"
+
+  fail_cases:
+    - name: "后台审核撮合订单 03_失败：审核订单为空"
+      description: "审核订单为空"
+      input:
+        action: "approve"
+        mark: "null_id"
+      expected:
+        status_code: 400
+        error: "Invalid order_id or action"
+    - name: "后台审核撮合订单 04_失败：审核订单不存在"
+      description: "审核订单不存在"
+      input:
+        action: "reject"
+        mark: "nonexistent"
+      expected:
+        status_code: 404
+        error: "Purchase order not found"
+    - name: "后台审核撮合订单 05_失败：审核操作为空，没传通过或拒绝"
+      description: "审核操作为空，没传通过或拒绝"
+      input:
+        action: null
+        mark: "exist"
+      expected:
+        status_code: 400
+        error: "Invalid order_id or action"
+
+    - name: "后台审核撮合订单 06_失败：审核操作传参错误，非通过或异常"
+      description: "审核操作传参错误，非通过或异常"
+      input:
+        action: "xixixi"
+        mark: "exist"
+      expected:
+        status_code: 400
+        error: "Invalid order_id or action"
+
+    - name: "后台审核撮合订单 07_失败：订单状态已被审核（通过），再次审核拒绝 审核失败"
+      description: "订单状态已被审核（通过），再次审核拒绝 审核失败"
+      input:
+        action: "reject"
+        mark: "complete"
+      expected:
+        status_code: 400
+        error: "Order is not pending review"
+
+    - name: "后台审核撮合订单 08_失败：订单状态已被审核（拒绝），再次审核拒绝 审核失败"
+      description: "订单状态已被审核（拒绝），再次审核拒绝 审核失败"
+      input:
+        action: "reject"
+        mark: "canceled"
+      expected:
+        status_code: 400
+        error: "Order is not pending review"
+
+    - name: "后台审核撮合订单 09_失败：订单状态已被审核（通过），再次审核通过 审核失败"
+      description: "订单状态已被审核（通过），再次审核通过 审核失败"
+      input:
+        action: "approve"
+        mark: "complete"
+      expected:
+        status_code: 400
+        error: "Order is not pending review"
+
+    - name: "后台审核撮合订单 10_失败：订单状态已被审核（拒绝），再次审核通过 审核失败"
+      description: "订单状态已被审核（拒绝），再次审核通过 审核失败"
+      input:
+        action: "approve"
+        mark: "canceled"
+      expected:
+        status_code: 400
+        error: "Order is not pending review"
+
+    - name: "后台审核撮合订单 11_失败：管理员无权限审批，审批通过失败"
+      description: "订单状态已被审核（通过），再次审核通过 审核失败"
+      input:
+        action: "approve"
+        mark: "exist"
+        permit: "no_permit"  # 代表无权限用户
+      expected:
+        status_code: 403
+        error: "Insufficient permissions"
+
+    - name: "后台审核撮合订单 12_失败：管理员无权限审批，审批拒绝失败"
+      description: "订单状态已被审核（拒绝），再次审核通过 审核失败"
+      input:
+        action: "reject"
+        mark: "exist"
+        permit: "no_permit"  # 代表无权限用户
+      expected:
+        status_code: 403
+        error: "Insufficient permissions"
+

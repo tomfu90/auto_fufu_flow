@@ -1,37 +1,48 @@
-success_register:
+success_cases:
+# {{random_username}} /{{random_phone}}/{{random_email}} 3个占位符,有封装方法会渲染获取，变成对应符合规则的随机数
   - name: "注册用例01：注册成功"
     input:
       username: "{{random_username}}"
       password: "abc12345"
       confirm_password: "abc12345"
+      phone: "{{random_phone}}"
+      email: "{{random_email}}"
     expected:
       status_code: 200
       message: "注册成功"
 
-fail_register:
+# mark 代表重复注册3种场景，需要提前构造数据
+# mark =1 username_repeat 重复用户 2 phone_repeat 手机号重复 3 email_repeat 邮箱重复
+fail_cases:
   - name: "注册用例02：用户名为空，注册失败"
     input:
       username: null
       password: "abc12345"
       confirm_password: "abc12345"
+      phone: "15044445555"
+      email: "testwww@qq.com"
     expected:
       status_code: 400
       error: "账号或密码不能为空"
 
   - name: "注册用例03：密码为空注册失败"
     input:
-      username: "fufu"
+      username: "{{random_username}}"
       password: null
       confirm_password: "abc12345"
+      phone: "15044445555"
+      email: "testwww@qq.com"
     expected:
       status_code: 400
       error: "账号或密码不能为空"
 
   - name: "注册用例04：确认密码为空注册失败"
     input:
-      username: "fufu"
+      username: "{{random_username}}"
       password: "abc12345"
       confirm_password: null
+      phone: "15044445555"
+      email: "testwww@qq.com"
     expected:
       status_code: 400
       error: "账号或密码不能为空"
@@ -41,6 +52,8 @@ fail_register:
       username: "fufu@@"
       password: "abc12345"
       confirm_password: "abc12345"
+      phone: "15044445555"
+      email: "testwww@qq.com"
     expected:
       status_code: 403
       error: "账号只能由数字+字母组成"
@@ -50,6 +63,8 @@ fail_register:
       username: "f"
       password: "abc12345"
       confirm_password: "abc12345"
+      phone: "15044445555"
+      email: "testwww@qq.com"
     expected:
       status_code: 403
       error: "账号长度不在2-10之间"
@@ -59,51 +74,86 @@ fail_register:
       username: "fufu1234567"
       password: "abc12345"
       confirm_password: "abc12345"
+      phone: "15044445555"
+      email: "testwww@qq.com"
     expected:
       status_code: 403
       error: "账号长度不在2-10之间"
 
   - name: "注册用例08：密码格式错误"
     input:
-      username: "abc12"
+      username: "{{random_username}}"
       password: "abc12345@@"
       confirm_password: "abc12345@@"
+      phone: "15044445555"
+      email: "testwww@qq.com"
     expected:
       status_code: 403
       error: "密码只能由数字+字母+下划线组成"
 
   - name: "注册用例09：密码长度错误：小于最小"
     input:
-      username: "abd123"
+      username: "{{random_username}}"
       password: "abd11"
       confirm_password: "abd11"
+      phone: "15044445555"
+      email: "testwww@qq.com"
     expected:
       status_code: 403
       error: "密码长度不在6-16之间"
 
   - name: "注册用例10：密码长度错误：大于最大"
     input:
-      username: "abc123"
+      username: "{{random_username}}"
       password: "abc12012345678901"
       confirm_password: "abc12012345678901"
+      phone: "15044445555"
+      email: "testwww@qq.com"
     expected:
       status_code: 403
       error: "密码长度不在6-16之间"
 
   - name: "注册用例11：密码和确认密码不相同"
     input:
-      username: "abf123"
+      username: "{{random_username}}"
       password: "abc1201"
       confirm_password: "abc1202"
+      phone: "15044445555"
+      email: "testwww@qq.com"
     expected:
       status_code: 403
       error: "密码和确认密码不一致"
 
-  - name: "注册用例12：重复注册"
+  - name: "注册用例12：重复注册-用户名"
     input:
-      username: "tester"
-      password: "abc1201"
-      confirm_password: "abc1201"
+      username: "repeat"
+      password: "abc12345"
+      confirm_password: "abc12345"
+      phone: "{{random_phone}}"
+      email: "{{random_email}}"
+      mark: "username_repeat"
     expected:
       status_code: 403
       error: "账号已注册，请勿重复注册"
+  - name: "注册用例13：重复注册-手机号"
+    input:
+      username: "{{random_username}}"
+      password: "abc12345"
+      confirm_password: "abc12345"
+      phone: "repeat"
+      email: "{{random_email}}"
+      mark: "phone_repeat"
+    expected:
+      status_code: 403
+      error: "该手机号已被注册"
+  - name: "注册用例14：重复注册-邮箱"
+    input:
+      username: "{{random_username}}"
+      password: "abc12345"
+      confirm_password: "abc12345"
+      phone: "{{random_phone}}"
+      email: "repeat"
+      mark: "email_repeat"
+    expected:
+      status_code: 403
+      error: "该邮箱已被注册"

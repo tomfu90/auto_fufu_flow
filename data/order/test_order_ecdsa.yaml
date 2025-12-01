@@ -1,0 +1,201 @@
+test_cases:
+  success_cases: #成功用例
+    - name: "创建订单01_创建成功：cny订单"
+      query_params:
+        version: "v1"
+        page: 1
+      signature:
+        secret: "{{en.ecdsa_SECRET}}"
+      input:
+        product_id: "AB3"
+        amount: 100
+        order_type: "DEPOSIT"
+        currency: "CNY"
+      expected:
+        status_code: 201
+        amount: 100
+        product_id: "AB3"
+    - name: "创建订单02_创建成功：USD订单"
+      query_params:
+        version: "v1"
+        page: 1
+      signature:
+        secret: "{{en.ecdsa_SECRET}}"
+      input:
+        product_id: "AB4"
+        amount: 100.55
+        order_type: "PAYMENT"
+        currency: "USD"
+      expected:
+        status_code: 201
+        amount: 100.55
+        product_id: "AB4"
+
+  fail_cases: #失败用例
+    - name: "创建订单03_创建失败：金额非数字"
+      query_params:
+        version: "v1"
+        page: 1
+      signature:
+        secret: "{{en.ecdsa_SECRET}}"
+        signature_mode: "valid_secret" #有效签名，接口参数错误
+      input:
+        product_id: "AB3"
+        amount: "abc"
+        order_type: "DEPOSIT"
+        currency: "CNY"
+      expected:
+        status_code: 400
+        error: "Invalid amount"
+
+    - name: "创建订单04_创建失败：product_id为空"
+      query_params:
+        version: "v1"
+        page: 1
+      signature:
+        secret: "{{en.ecdsa_SECRET}}"
+        signature_mode: "valid_secret" #有效签名，接口参数错误
+      input:
+        product_id: null
+        amount: 200
+        order_type: "DEPOSIT"
+        currency: "CNY"
+      expected:
+        status_code: 400
+        error: "Invalid product_id"
+
+    - name: "创建订单05_创建失败：product_id长度不对"
+      query_params:
+        version: "v1"
+        page: 1
+      signature:
+        secret: "{{en.ecdsa_SECRET}}"
+        signature_mode: "valid_secret" #有效签名，接口参数错误
+      input:
+        product_id: "a"
+        amount: 200
+        order_type: "DEPOSIT"
+        currency: "CNY"
+      expected:
+        status_code: 400
+        error: "Invalid product_id"
+
+    - name: "创建订单06_创建失败：currency无效"
+      query_params:
+        version: "v1"
+        page: 1
+      signature:
+        secret: "{{en.ecdsa_SECRET}}"
+        signature_mode: "valid_secret" #有效签名，接口参数错误
+      input:
+        product_id: "aaa"
+        amount: 200
+        order_type: "DEPOSIT"
+        currency: "CNY2"
+      expected:
+        status_code: 400
+        error: "Invalid currency"
+
+    - name: "创建订单07_创建失败：order_type无效"
+      query_params:
+        version: "v1"
+        page: 1
+      signature:
+        secret: "{{en.ecdsa_SECRET}}"
+        signature_mode: "valid_secret" #有效签名，接口参数错误
+      input:
+        product_id: "aaa"
+        amount: 200
+        order_type: "DEPOSIT3"
+        currency: "CNY"
+      expected:
+        status_code: 400
+        error: "Invalid order_type"
+
+    - name: "创建订单08_创建失败：签名错误_秘钥错误导致"
+      query_params:
+        version: "v1"
+        page: 1
+      signature:
+        secret: "SuperSecretKey456!2"
+        signature_mode: "invalid_secret" #无效签名，ecdsa秘钥错误
+      input:
+        product_id: "aaa"
+        amount: 200
+        order_type: "DEPOSIT"
+        currency: "CNY"
+      expected:
+        status_code: 401
+        error: "Invalid ECDSA signature"
+
+    - name: "创建订单09_创建失败：秘钥为空"
+      query_params:
+        version: "v1"
+        page: 1
+      signature:
+        secret: null
+        signature_mode: "empty_secret" #无效签名，ecdsa秘钥为空
+      input:
+        product_id: "aaa"
+        amount: 200
+        order_type: "DEPOSIT"
+        currency: "CNY"
+      expected:
+        status_code: 400
+        error: "Missing required headers: X-API-Key, X-Timestamp, X-Nonce, X-Signature"
+
+    - name: "创建订单10_创建失败：篡改签名数据"
+      query_params:
+        version: "v1"
+        page: 1
+      signature:
+        secret: "{{en.ecdsa_SECRET}}"
+        signature_mode: "tampered_body" #有效签名，签名后篡改请求数据
+      input:
+        product_id: "aaa"
+        amount: 200
+        order_type: "DEPOSIT"
+        currency: "CNY"
+      expected:
+        status_code: 401
+        error: "Invalid ECDSA signature"
+
+
+    - name: "创建订单11_创建失败：时序攻击_timestamp过期超出期限"
+      query_params:
+        version: "v1"
+        page: 1
+      signature:
+        secret: "{{en.ecdsa_SECRET}}"
+        signature_mode: "expired_timestamp" #有效签名，时间戳过期超过服务器允许范围
+      input:
+        product_id: "aaa"
+        amount: 200
+        order_type: "DEPOSIT"
+        currency: "CNY"
+      expected:
+        status_code: 401
+        error: "Invalid ECDSA signature"
+
+
+    - name: "创建订单12_创建失败：重放攻击"
+      query_params:
+        version: "v1"
+        page: 1
+      signature:
+        secret: "{{en.ecdsa_SECRET}}"
+        signature_mode: "replay_attack" #有效签名，重放攻击
+      input:
+        product_id: "AB3"
+        amount: 100
+        order_type: "DEPOSIT"
+        currency: "CNY"
+      expected:
+        status_code: 401
+        error: "Invalid ECDSA signature"
+
+
+
+
+
+
