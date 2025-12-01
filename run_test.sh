@@ -11,4 +11,4 @@ pytest tests --alluredir=./report/allure-results "$@"
 allure generate ./report/allure-results -o ./report/allure-report --clean
 
 # 自动打开报告（可选，Mac/Linux可用）
-allure open ./report/allure-report
+#allure open ./report/allure-report
