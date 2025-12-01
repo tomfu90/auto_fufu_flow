@@ -70,7 +70,7 @@ test_cases:
     input:
       product_id: "AB"
       "currency": "CNY"
-      amount: 6000
+      amount: 100000
       order_type: "PAYMENT"
     expected:
       status_code: 422
@@ -80,7 +80,7 @@ test_cases:
     input:
       product_id: "AB"
       "currency": "CNY"
-      amount: 7000
+      amount: 100000
       order_type: "WITHDRAW"
     expected:
       status_code: 422

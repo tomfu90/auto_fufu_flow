@@ -11,7 +11,7 @@ instance_dir.mkdir(exist_ok=True)
 db_path = instance_dir / "orders.db"
 
 def get_db_connection():
-    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.execute("PRAGMA foreign_keys = ON")
     conn.row_factory = sqlite3.Row
     return conn
@@ -169,6 +169,8 @@ def init_db():
         conn.execute('''
                     INSERT OR IGNORE INTO admins (username,password,role) VALUES (?,?,?)
                 ''', ('XIXI', '123AA', "NORMAL"))
+
+        conn.commit()
 
 
 

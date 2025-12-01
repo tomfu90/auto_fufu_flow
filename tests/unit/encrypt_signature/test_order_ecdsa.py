@@ -27,6 +27,8 @@ print("秘钥:",context["en"]["ecdsa_SECRET"])
 
 @pytest.mark.parametrize('case', success_cases)
 def test_order_ecdsa_success(db_conn,config,default_user,logged_user_client,case):
+    import os
+    print("\n>>> [函数内实时] ecdsa_SECRET =", repr(os.getenv("ecdsa_SECRET")))
     # 设置allure标题
     allure.dynamic.title(case['name'])
     # 设置输出框标题

@@ -335,6 +335,7 @@ def create_order_md5():
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          """, (order_id, username, amount, currency.upper(), order_type.upper(),
                product_id, status, created_at))
+        conn.commit()  # 新增：提交事务
 
     return jsonify({
         "order_id": order_id,
@@ -422,6 +423,8 @@ def create_order_hmac():
         product_id,status,created_at) values (?,?,?,?,?,?,?,?)"""
         ,(order_id,username,amount,currency.upper(),order_type.upper(),product_id,status,created_at))
 
+        conn.commit()  # 新增：提交事务
+
     return jsonify({
         "order_id": order_id,
         "username": username,
@@ -492,6 +495,8 @@ def create_order_ecdsa():
         product_id,status,created_at) values (?,?,?,?,?,?,?,?)"""
         ,(order_id,username,amount,currency.upper(),order_type.upper(),product_id,status,created_at))
 
+        conn.commit()  # 新增：提交事务
+
     return jsonify({
         "order_id": order_id,
         "username": username,
@@ -533,6 +538,7 @@ def login():
         # 删除旧token ,插入新token，防止多个token存在
         conn.execute('''delete from tokens where username=?''', ( username.lower(),))
         conn.execute('''insert into tokens values (?,?,?,?)''', (token,username.lower(),now_at,expires_at))
+        conn.commit()  # 新增：提交事务
 
     return jsonify({"access_token": token,"info":"登陆成功"})
 
@@ -651,6 +657,7 @@ def create_order():
         conn.execute(""" insert into orders(order_id,username,amount,currency,order_type,
         product_id,status,created_at) values (?,?,?,?,?,?,?,?)"""
         ,(order_id,username,amount,currency.upper(),order_type.upper(),product_id,status,created_at))
+        conn.commit()  # 新增：提交事务
 
     return( {
         "order_id": order_id,
@@ -713,6 +720,7 @@ def upload_file():
         conn.execute(""" insert into uploads(filename,original_name,file_size,
         username,upload_time) values (?,?,?,?,?)""",
                      (file_name,original_name,file_size,username,upload_time))
+        conn.commit()  # 新增：提交事务
     return jsonify({"message": "文件上传成功", "filename": file_name})
 
 @app.route('/api/register', methods=['post'])
@@ -776,6 +784,7 @@ def register():
             "INSERT INTO accounts (username, balance) VALUES (?, ?)",
             (username.lower(), 0.0)
         )
+        conn.commit()  # 新增：提交事务
 
     return jsonify({"username": username,"message":"注册成功"})
 
@@ -815,6 +824,8 @@ def create_listing():
             INSERT INTO listings (seller_username, product_id, amount, currency, created_at,status)
             VALUES (?, ?, ?, ?, ?, ?)
         """, (username, product_id, amount, currency.upper(), created_at,status))
+        conn.commit()  # 新增：提交事务
+
         listing_id = cursor.lastrowid
 
     return jsonify({
@@ -858,6 +869,7 @@ def cancel_listing():
         # 执行取消：更新状态为 CANCELED
         conn.execute("""
             UPDATE listings SET status = 'CANCELLED' WHERE id = ? """, (listing_id,))
+        conn.commit()  # 新增：提交事务
 
     return jsonify({
         "message": "Listing canceled successfully",
@@ -965,6 +977,7 @@ def create_purchase_order_ecdsa():
             listing['currency'],
             created_at
         ))
+        conn.commit()  # 新增：提交事务
         order_id = cursor.lastrowid
 
     return jsonify({
@@ -1054,6 +1067,7 @@ def create_purchase_order():
             listing['currency'],
             created_at
         ))
+        conn.commit()  # 新增：提交事务
         order_id = cursor.lastrowid
     return jsonify({
         "message": "Purchase order created and pending review",
@@ -1141,6 +1155,7 @@ def admin_login():
         conn.execute("DELETE FROM tokens WHERE username = ?", (username,))
         conn.execute("INSERT INTO tokens (token, username, created_at, expires_at) VALUES (?, ?, ?, ?)",
                      (token, username, now_at, expires_at))
+        conn.commit()  # 新增：提交事务
 
     return jsonify({
         "access_token": token,
@@ -1189,6 +1204,7 @@ def review_purchase_order():
             SET status = ?, reviewed_at = ?, reviewed_by = ?, review_action = ?
             WHERE id = ?
         """, (new_status, reviewed_at, username, action, order_id))
+        conn.commit()  # 新增：提交事务
 
         if action == 'approve':
             # 获取卖家 ID
@@ -1213,6 +1229,7 @@ def review_purchase_order():
                 UPDATE listings SET status = 'SOLD', sold_at = ?
                 WHERE id = ?
             """, (reviewed_at, po['listing_id']))
+            conn.commit()  # 新增：提交事务
 
     return jsonify({
         "order_id": order_id,
@@ -1294,6 +1311,7 @@ def admin_update_balance():
             "UPDATE accounts SET balance = ? WHERE username = ?",
             (new_balance, target_username)
         )
+        conn.commit()  # 新增：提交事务
 
     return jsonify({
         "success": True,

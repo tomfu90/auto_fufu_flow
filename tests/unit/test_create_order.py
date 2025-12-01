@@ -68,7 +68,7 @@ data_file = "data/order/create_order_validation.yaml"
 test_cases = load_yaml(data_file)['test_cases']
 
 @pytest.mark.parametrize('create_order_validation_case', test_cases)
-def test_create_order_validation(config, test_users, logged_user_client,create_order_validation_case):
+def test_create_order_validation(config, test_users, logged_user_client,create_order_validation_case,db_conn):
     '''创建订单失败'''
     print(f"\n{create_order_validation_case['name']} ")
     # 动态设置allure中的用例名称
@@ -79,6 +79,10 @@ def test_create_order_validation(config, test_users, logged_user_client,create_o
     user_creds = test_users['valid_user_users']
     user_cred = next(user for user in user_creds if user['role'] == "default")
     username = user_cred['username']
+    #查询当前用户余额：
+    row = db_conn.execute(" select balance from accounts where username =?  ",(username,)).fetchone()
+    balance = row['balance']
+    print(f"{username}:{balance} ")
     #发起请求-创建订单
     resp = logged_user_client[username].post(create_api_orders_url,  json=create_order_validation_case['input'])
     with allure.step('校验响应'):
