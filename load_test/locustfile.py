@@ -9,5 +9,6 @@ sys.path.insert(0,project_root)
 #from load_test.scenarios.listing_single import  BurstUser
 #from load_test.scenarios.buy import  TradingUser
 #from load_test.scenarios.mixed_load import TradingUser
-#from load_test.scenarios.multi_mixed_load import TradingUser
-from  load_test.scenarios.listing import ListingUser
+from load_test.scenarios.multi_mixed_load import TradingUser
+#from  load_test.scenarios.listing_new import ListingUser
+#from load_test.scenarios.buy_single import BurstUser

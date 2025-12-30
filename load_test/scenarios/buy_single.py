@@ -23,9 +23,12 @@ import os
 import logging
 import time
 import gevent
+import random
 from gevent.lock import RLock
 from locust import FastHttpUser, task, events,constant
 from locust.runners import MasterRunner, LocalRunner
+from libs.signature import ecdsa_signature
+from urllib.parse import urlencode
 
 # === 路径与配置加载 ===
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
@@ -35,9 +38,10 @@ config = load_yaml("config/config.yaml")
 env = config["env"]
 BASE_URL = config["environments"][env]["user"]["base_url"]
 LOGIN_URL = config["environments"][env]["user"]["login_url"]
-CREATE_LISTING_URL = config["environments"][env]["user"]["create_listing_url"]
+PURCHASE_ECDSA_URL_PATH = config["environments"][env]["user"]["create_purchase_order_ecdsa_url"]
 PASSWORD = "Abc12345"
 ACCOUNT_FILE = os.path.join(project_root, "data", "login", "registered_accounts.txt")
+listing_file = os.path.join(project_root, "data", "order", "listing.txt")
 #日志
 logger = logging.getLogger("locust")
 logger.setLevel(logging.INFO)
@@ -46,6 +50,9 @@ logger.setLevel(logging.INFO)
 with open(ACCOUNT_FILE, "r", encoding="utf-8") as f:
     ALL_ACCOUNTS = [line.strip() for line in f if line.strip()]
 
+with open(listing_file, "r", encoding="utf-8") as f:
+    ALL_listing = [line.strip() for line in f if line.strip()]
+
 # 读取环境变量，实际设置用户
 MAX_AVAILABLE = len(ALL_ACCOUNTS)
 TARGET_USERS = int(os.environ.get("TARGET_USERS"))
@@ -53,6 +60,13 @@ TARGET_USERS = min(TARGET_USERS, MAX_AVAILABLE)
 #-----‼️按worker对账号进行分片--！！！！
 total_workers = int(os.environ.get("total_workers",1)) #获取总进程数
 worker_id = int(os.environ.get("worker_id",0))        #获取当前进程id
+
+#读取环境变量-秘钥
+API_SECRET = os.environ.get("ecdsa_SECRET")
+if not API_SECRET:
+    logging.critical("❌ 环境变量 ecdsa_SECRET 未设置！")
+    raise EnvironmentError("Missing ecdsa_SECRET")
+
 #安全校验
 if len(ALL_ACCOUNTS) < TARGET_USERS:
     raise ValueError(f"❌ 账号不足：需要 {TARGET_USERS}，实际只有 {len(ALL_ACCOUNTS)}")
@@ -63,7 +77,8 @@ remainder = TARGET_USERS % total_workers            #余数
 start_idx = worker_id * accounts_per_worker + min(worker_id, remainder)
 end_idx = start_idx + accounts_per_worker + (1 if worker_id<remainder else 0)
 my_accounts = ALL_ACCOUNTS[start_idx:end_idx]
-
+#依赖数据偏移
+my_listings = ALL_listing[start_idx:end_idx]
 logging.warning(f"🎯 Target user count set to: {TARGET_USERS} (available accounts: {len(ALL_ACCOUNTS)})")
 
 # --- 用户分配器 ---
@@ -73,6 +88,9 @@ class UserAllocator:
         self._lock = RLock()
 #实例化分配器
 user_allocator = UserAllocator()
+
+# --- 数据分配器 ---
+data_lock= RLock()
 
 
 #  1. 定义全局时间变量，初始为None
@@ -90,11 +108,11 @@ def init_global_time(environment, **kwargs):
     GLOBAL_TASK_START = GLOBAL_BASE_TIME + PRE_WAIT
     GLOBAL_TASK_RUN = GLOBAL_TASK_START + RUN_TIME
     logging.info(f"📌 压测启动，全局时间基准初始化：预热至 {GLOBAL_TASK_START}，运行至 {GLOBAL_TASK_RUN}")
-    # 核心优化：分布式 → 仅Master执行；单机 → 直接执行
-    if isinstance(environment.runner, (LocalRunner, MasterRunner)):
-        # 2. 核心一行：Master/单机都能触发全局停止，自动适配部署模式
-        #environment.runner._event_loop.call_later(PRE_WAIT + RUN_TIME, environment.runner.quit)
-        gevent.spawn_later(PRE_WAIT + RUN_TIME, environment.runner.quit)
+    # # 核心优化：分布式 → 仅Master执行；单机 → 直接执行
+    # if isinstance(environment.runner, (LocalRunner, MasterRunner)):
+    #     # 2. 核心一行：Master/单机都能触发全局停止，自动适配部署模式
+    #     #environment.runner._event_loop.call_later(PRE_WAIT + RUN_TIME, environment.runner.quit)
+    #     gevent.spawn_later(PRE_WAIT + RUN_TIME, environment.runner.quit)
 # === 用户类 ===
 class BurstUser(FastHttpUser):
     host = BASE_URL
@@ -152,26 +170,50 @@ class BurstUser(FastHttpUser):
 
         # 休眠
         if GLOBAL_TASK_START and time.time() < GLOBAL_TASK_START:
-            time.sleep(GLOBAL_TASK_START - time.time())
+            gevent.sleep(GLOBAL_TASK_START - time.time())
 
 
 
 
 
     @task
-    def create_listing(self):
+    def PURCHASE_ECDSA(self):
         if not self.token:
             return
-        # if GLOBAL_TASK_RUN and time.time() >= GLOBAL_TASK_RUN:
-        #     #self.environment.runner.quit() #全局退出
-        #     self.environment.runner.stop()
 
+        with data_lock:
+            if not my_listings:
+                return
+            selected_id = my_listings.pop()
+        target_id = selected_id
+        if not target_id:
+            return  # 3次都没找到，放弃
+
+        query_params = {"version": "v1", "page": "1"}
+        payload = {"listing_id": target_id, "purchase_amount": 200.0}
+        body_str = json.dumps(payload, separators=(',', ':'), ensure_ascii=False)
+        full_url = self.host.rstrip("/") + PURCHASE_ECDSA_URL_PATH + "?" + urlencode(query_params, safe='')
+
+        headers = ecdsa_signature(
+            api_secret=API_SECRET,
+            method="POST",
+            path=PURCHASE_ECDSA_URL_PATH,
+            query_params=query_params,
+            body=body_str,
+            timestamp="",
+            nonce=""
+        )
+        headers.update({
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.token}"
+        })
+        # 3. 发起购买请求
         try:
-            resp = self.client.post(
-                CREATE_LISTING_URL,
-                json={"product_id": "baidu", "amount": 200, "currency": "CNY"},
-                headers={"Authorization": f"Bearer {self.token}"},
-                name="/create_listing")
+            resp = self.client.post(full_url,
+                                    data=body_str,
+                                    headers=headers,
+                                    name="/api/purchase/create/ecdsa",
+                                    timeout=30)
             resp.raise_for_status()
             status = getattr(resp, 'status_code', 'unknown')
             if not resp.content:
@@ -180,16 +222,17 @@ class BurstUser(FastHttpUser):
             try:
                 json_data = resp.json()
             except Exception as e:
-                error_msg = f"JSON 解析失败 | 账号: {self.account} | 异常: {e}"
-                logger.error(error_msg)
-                raise Exception(f"{error_msg}")
-            listing_id = json_data["listing_id"]
-            if not listing_id:
-                err_msg = f"挂单失败: {self.account} (HTTP {resp.status_code})，response:{resp.text[:200]}"
-                logger.error(err_msg)
-                raise Exception(f"{resp.status_code}{resp.url}{resp.text[:200]}")
+                logger.error(str(e))
+                raise Exception(f"{str(e)}")
+
+            if status != 201 :
+                err_msg = f" 购买失败: {self.account} (HTTP {resp.status_code})，response:{resp.text[:200]}"
+                logger.error(f"{resp.status_code}{resp.url}{resp.text[:200]}")
+                raise Exception(err_msg)
+
         except Exception as e:
             logger.error(str(e))
+        self.stop()
 
 
 

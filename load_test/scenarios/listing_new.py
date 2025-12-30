@@ -14,15 +14,26 @@
   - 查询余额：中频
 
 优化：
-  - 移除 catch_response=True
-  - 移除 safe_json 补丁
   - 登录失败即跳过后续任务
-  - 重新优化 日志节流 用随机数，不用索引自增
   - 使用 FastHttpUser
-  - 优化日志记录，master节点统一将失败&异常日志写入到日志文件里，好排错
-  - 优化业务错误也让locust报错raise exception
   - 优化40x和50x resp.raise_for_status()  # 4xx/5xx 自动抛异常，标记失败
-  - 优化 on_start里用self.stop 停止用户，配合raise标记失败，失败也只初始化1次
+  - 优化压测机性能：修改默认连接池，默认0 改为300
+  - 优化压测机性能：修改@task 失败重试次数，默认2 改为1
+  - 优化压测机 的 OSError (49) 端口耗尽：
+  ============ =========
+    linxu 优化端口
+    # 1. 扩大临时端口范围（1024-65535，可用端口数最大化）
+    sudo sysctl -w net.ipv4.ip_local_port_range="1024 65535"
+    # 2. 允许复用 TIME_WAIT 端口（Linux 核心优化，必开）
+    sudo sysctl -w net.ipv4.tcp_tw_reuse=1
+    # 3. 缩短 TIME_WAIT 超时（60秒→10秒，1秒太短易出问题）
+    sudo sysctl -w net.ipv4.tcp_fin_timeout=10
+    mac 优化端口
+    # 1. 扩大临时端口范围（Mac 没有 net.ipv4.ip_local_port_range，用这个！）
+    sudo sysctl -w net.inet.ip.portrange.first=1024
+    sudo sysctl -w net.inet.ip.portrange.last=65535
+    # 2. 缩短 TIME_WAIT 超时（MSL=1000毫秒，TIME_WAIT=2×MSL=2秒，回收超快）
+    sudo sysctl -w net.inet.tcp.msl=1000
 """
 
 import os
@@ -72,45 +83,11 @@ start_idx = worker_id * accounts_per_worker + min(worker_id, remainder)
 end_idx = start_idx + accounts_per_worker + (1 if worker_id < remainder else 0)
 my_accounts = ALL_ACCOUNTS[start_idx:end_idx]
 
-#==========日志优化，压测失败写入到本地文件==========
-# 1复用locust原生logger(同步到web ui/终端/文件)
+
+# 1复用locust原生logger(同步到web ui/终端)
 logger = logging.getLogger("locust")
 logger.setLevel(logging.INFO)
-# 2. 配置路径：先获取 logs 文件夹路径，再拼接文件路径
-log_dir = os.path.join(project_root, "logs")  # 文件夹路径
-file_name = os.path.join(log_dir, "locust_error.log")  # 文件路径
-file_abs_path = os.path.abspath(file_name)  # 转为绝对路径，确保判断一致
-# 3. 确保 logs 文件夹存在（修复核心问题：创建文件夹而非文件）
-os.makedirs(log_dir, exist_ok=True)# 传文件夹路径，而非文件路径
 
-log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-
-# 添加文件处理器（不用判断是否已存在，重复添加会自动去重，Locust 内部有兼容）
-file_handler = logging.FileHandler(file_name, mode='a',encoding="utf-8")
-file_handler.setFormatter(log_formatter)
-file_handler.setLevel(logging.WARNING)  # 只记录失败/警告日志
-# 先判断是否已有处理器，再添加（避免重复）
-def has_file_handler(logger, filepath):
-    for handler in logger.handlers:
-        # 判定条件：是 FileHandler 且文件绝对路径一致
-        if isinstance(handler, logging.FileHandler) and handler.baseFilename == filepath:
-            return True
-    return False
-
-if not has_file_handler(logger, file_abs_path):
-    logger.addHandler(file_handler)
-# 初始化随机种子（只执行一次，保证节流均匀）
-random.seed()
-def log_failure(log_type, msg, throttle_ratio=0.03):
-    """
-        极简随机节流日志：按比例记录失败日志，无额外计数
-        :param log_type: 错误类型（如 "ERC20_FAIL"、"HTTP_500"）
-        :param msg: 错误详情
-        :param throttle_ratio: 节流比例（0-1，1=全部记录，0.1=10%记录）
-        """
-    # 核心：随机判断是否记录，满足比例则写入日志
-    if random.random() <= throttle_ratio:
-        logger.warning(f"[{log_type}] {msg}")
 
 
 # 阶梯压测
@@ -147,7 +124,6 @@ def on_locust_init(environment, **kwargs):
     gevent.spawn(run_stages)
 
 
-
 class UserAllocator:
     def __init__(self):
         self._idx = 0
@@ -160,21 +136,25 @@ user_allocator = UserAllocator()
 class ListingUser(FastHttpUser):
     host = BASE_URL
     wait_time = between(0.5, 1.5)
+    max_connections = 100  # 连接池 ，设置100个持久tcp连接，避免端口耗尽
+    max_retries = 1 # @task方法 最大重试次数。默认2改为1
 
     def on_start(self):
         self.account = None
         self.token = ""
         self.my_listings = []
 
+        if hasattr(self, "_initialized"):
+            return
+        self._initialized = True
+
         if not my_accounts:
             logger.error("❌ 当前 worker 未分配到任何账号！")
-            self.stop()
             return
 
         with user_allocator._lock:
             current_idx = user_allocator._idx
             if current_idx >= len(my_accounts):
-                self.stop()
                 return
             user_allocator._idx += 1
             self.account = my_accounts[current_idx]
@@ -187,30 +167,29 @@ class ListingUser(FastHttpUser):
                 timeout=(3, 10)
             )
             resp.raise_for_status()
+            # 如果走到这里，说明 resp.status_code 是 2xx（否则 Locust 已抛异常）
+            #防御
             status = getattr(resp, 'status_code', 'unknown')
             if not resp.content:
-                log_failure("login", f"{self.account}Empty response body (status: {status})")
-                self.stop()
+                logger.error(f"Empty response body (status: {status})")
                 raise Exception(f"Empty response body (status: {status})")
             try:
                 json_data = resp.json()
             except Exception as e:
-                log_failure("login", f"{self.account} |{str(e)}")
-                self.stop()
-                raise Exception(str(e))
+                # 捕获 JSON 解析失败
+                error_msg = f"JSON 解析失败 | 账号: {self.account} | 异常: {e}"
+                logger.error(error_msg)
+                raise Exception(f"{error_msg}")
             self.token = json_data.get("access_token")
             if not self.token:
                 error_msg = f"登录成功但无 access_token | 账号: {self.account} | JSON: {json_data}"
-                log_failure("login_no_token", error_msg)
-                self.stop()
-                raise Exception(error_msg)
-
+                logger.error(error_msg)
+                raise Exception(f"{error_msg}")
         except Exception as e:
             # Locust 已自动将此请求标记为失败
             error_msg = f"登录异常 | 账号: {self.account} | 错误: {e}"
-            log_failure("login_exception", error_msg)
-            self.stop()
-            raise
+            logger.error(error_msg)
+
 
 
     @task(10)
@@ -229,27 +208,23 @@ class ListingUser(FastHttpUser):
             #防御
             status = getattr(resp, 'status_code', 'unknown')
             if not resp.content:
-                log_failure("create_listing", f"{self.account}Empty response body (status: {status})")
-                raise ValueError(f"Empty response body (status: {status})")
-            # HTTP 成功（201）
+                logger.error(f"Empty response body (status: {status})")
+                raise Exception(f"Empty response body (status: {status})")
             try:
                 json_data = resp.json()
             except Exception as e:
-                log_failure("create_listing", f"{self.account} |{str(e)}")
-                raise Exception(str(e))
+                logger.error(f"异常{str(e)}")
+                raise Exception(f"{str(e)}")
             listing_id = json_data.get("listing_id")
             if listing_id:
                 self.my_listings.append(listing_id)
             else:
                 error_msg = f"挂单成功但无 listing_id | 账号: {self.account} | JSON: {json_data}"
-                log_failure("listing_no_id", error_msg)
-                raise Exception(error_msg)
+                logger.error(error_msg)
+                raise Exception(f"{error_msg}")
         except Exception as e:
-            # 包括：5xx、4xx、超时、JSON 解析失败等
-            # Locust 已自动标记为失败
             error_msg = f"挂单异常 | 账号: {self.account} | 错误: {e}"
-            log_failure("listing_exception", error_msg)
-            raise
+            logger.error(error_msg)
 
 
     @task(2)
@@ -268,8 +243,7 @@ class ListingUser(FastHttpUser):
             resp.raise_for_status()
         except Exception as e:
             error_msg = f"查询挂单异常 | 账号: {self.account} | 挂单ID: {listing_id} | 错误: {e}"
-            log_failure("query_listing_exception", error_msg)
-            raise
+            logger.error(error_msg)
 
 
     @task(5)
@@ -286,5 +260,4 @@ class ListingUser(FastHttpUser):
             resp.raise_for_status()
         except Exception as e:
             error_msg = f"查询余额异常 | 账号: {self.account} | 错误: {e}"
-            log_failure("query_balance_exception", error_msg)
-            raise
+            logger.error(error_msg)

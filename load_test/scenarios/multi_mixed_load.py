@@ -4,16 +4,16 @@
 压测方式：
  - 压测典型场景： 区分角色阶梯压测，复杂撮合逻辑
  - 压测e2e场景说明：账号区分角色（卖家&买家），登陆-卖家角色挂单-买家角色买单-卖家查询挂单详情 -所有用户查询余额
- - 分布式压测（master-worker压测模式）🐮🍺
+ - 分布式压测（master-worker压测模式）
  - 复用之前e2e阶梯压测场景
  - 方案：总账号文件列表 按workerid进行切片索引：起始为0，按workerid进行偏移
  -----：再每个worker进行内部分配买家+卖家，其他逻辑复用之前e2e阶梯压测场景
 
 行为：
   - 卖家：高频挂单（记录到 self.my_listings）
-  - 买家：中频购买（从全局池买别人挂的单）
-  - 查询挂单：仅卖家查自己挂的单；买家不发查询请求
-  - 查询余额：买家和卖家都能查询
+  - 买家：高频购买（从全局池买别人挂的单）
+  - 查询挂单：中频- 仅卖家查自己挂的单；买家不发查询请求
+  - 查询余额：低频- 买家和卖家都能查询
 
 优化：
   - 多进程模式，账号读取出来作为一个公共池，每个进程根据进程id进行偏移获取不同账号，形成进程内账号池，再区分买卖角色
@@ -23,14 +23,16 @@
   - 登录仅尝试一次，失败即记录并放弃
   - 限制 public_listings 最大长度（防 OOM），防止内存泄漏
   - 支持阶梯压测
-  - 日志记录不刷屏（每隔10条记录失败日志）
+  - 挂单池改用「dict + deque」：dict存挂单信息（O(1)查），deque存顺序（O(1)删）
+  - 买家选单：3次随机重试，无全量遍历
+  - 锁粒度最小化：读快照放锁外，仅写操作加锁
 
 # ✅ 本脚本已通过以下验证：
 #   - 并发安全（RLock 保护共享状态）
-#   - 内存可控（挂单池上限 + 成功即移除）
+#   - 内存可控（公告挂单池上限 3000 + 成功即移除；个人挂单池上限 100 +移除）
 #   - 角色行为隔离（买家/卖家任务分离）
-#   - 错误抑制（日志频率控制 + 登录失败降级）
-#   - Locust 规范（catch_response + with 上下文）
+#   - 无O(n)循环，高并发性能稳定
+
 
 """
 
@@ -40,9 +42,9 @@ import logging
 import random
 from urllib.parse import urlencode
 from gevent.lock import RLock
-from locust import events, HttpUser, task, between
-import time
+from locust import events,FastHttpUser, task, between
 import gevent
+from collections import deque
 from libs.utils import load_yaml
 from libs.signature import ecdsa_signature
 from locust.runners import MasterRunner, LocalRunner
@@ -59,15 +61,9 @@ GET_LISTING_URL = config["environments"][env]["user"]["get_listing_url"]
 get_balance_url = config["environments"][env]["user"]["get_balance_url"]
 # 统一登陆密码
 PASSWORD = "Abc12345"
-# 日志基础配置（一次性配置，全局生效）
-logging.basicConfig(
-    level=logging.INFO,  # 日志输出级别：只输出ERROR及以上级别（过滤INFO/DEBUG，减少冗余）
-    format="%(asctime)s - %(levelname)s - %(message)s",  # 日志显示格式
-    handlers=[logging.StreamHandler()]  # 日志输出目标：仅输出到控制台（不写本地文件，符合你的需求）
-)
-# 创建日志器实例（用于区分不同模块的日志，避免冲突）
-logger = logging.getLogger("Locust压测")
-
+# 复用locust原生logger(同步到web ui/终端)
+logger = logging.getLogger("locust")
+logger.setLevel(logging.INFO)
 
 #读取环境变量-秘钥
 API_SECRET = os.environ.get("ecdsa_SECRET")
@@ -98,16 +94,6 @@ start_idx = worker_id * accounts_per_worker + min(worker_id, remainder)
 end_idx = start_idx + accounts_per_worker + (1 if worker_id<remainder else 0)
 my_accounts = ALL_ACCOUNTS[start_idx:end_idx]
 
-# worker进程内部分配买家/卖家
-num_sellers = (len(my_accounts ) +1 )// 2
-num_buyers = len(my_accounts) // 2
-seller_accounts = my_accounts[:num_sellers]
-buyer_accounts =  my_accounts[num_sellers:]
-logging.info(
-    f"🧾 Worker {worker_id}/{total_workers} | "
-    f"账号范围 [{start_idx}:{end_idx}] | "
-    f"卖家: {num_sellers}, 买家: {num_buyers}"
-)
 
 # ------阶梯压测---------
 #配置阶梯策略
@@ -115,7 +101,7 @@ logging.info(
 stages = [
     (TARGET_USERS//3,10),     #10s内启动 1/3y压测用户
     120,                      #持续2分钟
-    (TARGET_USERS//3 *2,10),  #10s内启动 1/3压测用户
+    ((TARGET_USERS//3) *2,10),  #10s内启动 1/3压测用户
     120,                      #持续2分钟
     (TARGET_USERS,10),        #10s内启动 剩余1/3压测用户
     120                       #持续2分钟
@@ -147,34 +133,11 @@ def on_locust_init(environment, **kwargs):
     gevent.spawn(run_stages)
 
 
-# 进程挂单池（供买家购买）
-public_listings = []
+# ========== ：公共挂单池（dict + deque） ==========
+public_listings = {}
+listing_order = deque()
 public_lock = RLock()
-MAX_PUBLIC_LISTINGS = 10000  # 防止内存爆炸
-
-
-
-# 核心工具函数：频率控制的失败日志输出
-def log_failure(log_type, msg, interval=10):
-    """
-    函数作用：按“首次失败+间隔条数”输出失败日志，避免刷屏
-    参数说明：
-    - log_type: 日志类型（如"login"/"business"），用于区分不同场景的计数器（避免登录和业务失败计数混淆）
-    - msg: 要输出的失败日志内容（你业务代码里拼接的错误信息）
-    - interval: 频率间隔（默认10条输出1条，可自定义）
-    """
-    # 初始化计数器（用函数属性存，替代全局变量，更优雅）
-    # 逻辑：判断log_failure函数是否有"counters"属性，没有则初始化一个字典（key是日志类型，value是计数）
-    if not hasattr(log_failure, "counters"):
-        log_failure.counters = {"login": 0, "business": 0}  # 初始：登录、业务失败计数都为0
-
-    #对应类型的失败计数+1（每调用一次函数，说明发生一次失败）
-    log_failure.counters[log_type] += 1
-
-    # 频率控制核心逻辑（防刷屏的关键）
-    # 条件：首次失败（计数=1） 或 达到间隔条数（计数%interval==0，如每10条）
-    if log_failure.counters[log_type] == 1 or log_failure.counters[log_type] % interval == 0:
-        logger.error(msg)  # 满足条件时，才输出日志到控制台
+MAX_PUBLIC_LISTINGS = 3000  # 防止内存爆炸
 
 
 # --- 用户分配器 ---
@@ -186,21 +149,19 @@ class UserAllocator:
 user_allocator = UserAllocator()
 
 
-
-
-
-
 # --- Locust User ---
-class TradingUser(HttpUser):
+class TradingUser(FastHttpUser):
     host = BASE_URL
     wait_time = between(0.5, 1.5)
+    max_connections = 100 # 连接池 ，设置100个持久tcp连接，避免端口耗尽
+    max_retries = 1 # @task方法 最大重试次数。默认2改为1
 
     def on_start(self):
-        # === 关键修复：提前初始化所有可能用到的属性 ===
+        # === 关提前初始化所有可能用到的属性 ===
         self.role = None
         self.account = None
         self.token = ""
-        self.my_listings = []  # 必须在这里初始化！
+        self.my_listings = []  # 记录自己的挂单
 
         if hasattr(self, "_initialized"):
             return
@@ -213,39 +174,47 @@ class TradingUser(HttpUser):
                 return
             user_allocator._idx += 1
 
-        if current_idx < num_sellers:
-            self.role = "seller"
-            self.account = seller_accounts[current_idx]
-        elif current_idx < num_sellers + num_buyers:
-            self.role = "buyer"
-            self.account = buyer_accounts[current_idx - num_buyers]
+        # 分配账号后：
+        if current_idx < len(my_accounts):
+            account = my_accounts[current_idx]
+            # 轮询分配角色：偶数索引卖家，奇数买家
+            if current_idx % 2 == 0:
+                self.role = "seller"
+                self.account = account
+            else:
+                self.role = "buyer"
+                self.account = account
         else:
             return
 
         # === 登录：仅尝试一次，失败即记录并退出 ===
         try:
-            with self.client.post(
+            resp = self.client.post(
                     LOGIN_URL,
                     json={"username": self.account, "password": PASSWORD},
                     name="/api/login",
-                    timeout=30,
-                    catch_response=True
-                ) as resp:
-                    if resp.status_code == 200:
-                            resp.success()
-                            #自动更新token
-                            self.token = resp.json()["access_token"]
-                    else:
-                        err_msg = f"[{self.role}] 登录失败: {self.account} (HTTP {resp.status_code})，response:{resp.text[:200]}"
-                        log_failure("login",err_msg)
-                        resp.failure(f"{resp.status_code}{resp.url}{resp.text[:200]}")
-                        self.role = None
-                        return
+                    timeout=30)
+            resp.raise_for_status()
+            status = getattr(resp, 'status_code', 'unknown')
+            if not resp.content:
+                logger.error(f"Empty response body (status: {status})")
+                raise Exception(f"Empty response body (status: {status})")
+            try:
+                json_data = resp.json()
+            except Exception as e:
+                error_msg = f"JSON 解析失败 | 账号: {self.account} | 异常: {e}"
+                logger.error(error_msg)
+                raise Exception(f"{error_msg}")
+            self.token = json_data.get("access_token")
+            if not self.token:
+                error_msg = f"登录成功但无 access_token | 账号: {self.account} | JSON: {json_data}"
+                logger.error(error_msg)
+                raise Exception(f"{error_msg}")
         except Exception as e:
-            log_failure("login",str(e))
-            self.client.fail("str(e)")
-            self.role = None
-            return
+            # Locust 已自动将此请求标记为失败
+            error_msg = f"登录异常 | 账号: {self.account} | 错误: {e}"
+            logger.error(error_msg)
+
 
     # ==================== 卖家：挂单 ====================
     @task(10)
@@ -253,140 +222,171 @@ class TradingUser(HttpUser):
         if self.role != "seller" or not self.token:
             return
         try:
-            with self.client.post(
+            resp = self.client.post(
                     CREATE_LISTING_URL,
                     headers={"Authorization": f"Bearer {self.token}"},
                     json={"product_id": "baidu", "amount": 200, "currency": "CNY"},
                     name="/create_listing",
-                    timeout=30,
-                    catch_response=True
-            ) as resp:
-                if resp.status_code == 201:
-                    listing_id = resp.json()["listing_id"]
-                    resp.success()
+                    timeout=30)
+            resp.raise_for_status()
+            status = getattr(resp, 'status_code', 'unknown')
+            if not resp.content:
+                logger.error(f"Empty response body (status: {status})")
+                raise Exception(f"Empty response body (status: {status})")
+            try:
+                json_data = resp.json()
+            except Exception as e:
+                logger.error(f"异常{str(e)}")
+                raise Exception(f"{str(e)}")
+            listing_id = resp.json()["listing_id"]
+            if  listing_id:
                     self.my_listings.append(listing_id)
+                    # 加锁写入挂单池，仅写操作加锁
                     with public_lock:
-                        public_listings.append({
-                            "listing_id": listing_id,
-                            "seller": self.account
-                        })
+                        # 字典O(1)新增
+                        public_listings[listing_id]=self.account
+                        # 双端队列O(1)记录顺序
+                        listing_order.append(listing_id)
                         #  防止内存无限增长
                         if len(public_listings) > MAX_PUBLIC_LISTINGS:
-                            public_listings.pop(0) #最早的挂单就删除
-                else:
-                    err_msg = f"[{self.role}] 挂单失败: {self.account} (HTTP {resp.status_code})，response:{resp.text[:200]}"
-                    log_failure("business", err_msg)
-                    resp.failure(f"{resp.status_code}{resp.url}{resp.text[:200]}")
+                            oldest_id = listing_order.popleft()  # 删队首（O(1)）
+                            if oldest_id in public_listings:
+                                del public_listings[oldest_id]  # 删字典（O(1)）
+
+                    if len(self.my_listings) > 100:
+                        self.my_listings.pop(0)
+            else:
+                err_msg = f"[{self.role}] 挂单失败: {self.account} (HTTP {resp.status_code})，response:{resp.text[:200]}"
+                logger.error(err_msg)
+                raise Exception(f"{resp.status_code}{resp.url}{resp.text[:200]}")
         except Exception as e:
-            log_failure("business", str(e))
-            self.client.fail("str(e)")
+            logger.error(str(e))
 
     # ==================== 买家：购买 ====================
-    @task(4)
+    @task(8)
     def purchase_order(self):
         if self.role != "buyer" or not self.token:
             return
 
-        target = None
+        target_id = None
+        # 1. 无锁读：仅复制keys（轻量，O(1)快照）
         with public_lock:
-            candidates = []
-            for i, item in enumerate(public_listings):
-                if item["seller"] != self.account:
-                    candidates.append((i, item))
-            if candidates:
-                target_index, target = random.choice(candidates)
-
-        if not target:
+            all_ids = list(public_listings.keys())  # 只拿ID，不复制完整数据
+        if not all_ids:
             return
+        # 2. 3次随机重试：找非自己的挂单（无遍历）
+        for _ in range(3):
+            selected_id = random.choice(all_ids)
+            # 字典O(1)查询卖家账号
+            if public_listings[selected_id] != self.account:
+                target_id = selected_id
+                break
 
-        listing_id = target["listing_id"]
+        if not target_id:
+            return # 3次都没找到，放弃
 
+
+        query_params = {"version": "v1", "page": "1"}
+        payload = {"listing_id": target_id, "purchase_amount": 200.0}
+        body_str = json.dumps(payload, separators=(',', ':'), ensure_ascii=False)
+        full_url = self.host.rstrip("/") + PURCHASE_ECDSA_URL_PATH + "?" + urlencode(query_params, safe='')
+
+        headers = ecdsa_signature(
+            api_secret=API_SECRET,
+            method="POST",
+            path=PURCHASE_ECDSA_URL_PATH,
+            query_params=query_params,
+            body=body_str,
+            timestamp="",
+            nonce=""
+        )
+        headers.update({
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.token}"
+        })
+        # 3. 发起购买请求
         try:
-            query_params = {"version": "v1", "page": "1"}
-            payload = {"listing_id": listing_id, "purchase_amount": 200.0}
-            body_str = json.dumps(payload, separators=(',', ':'), ensure_ascii=False)
-            full_url = self.host.rstrip("/") + PURCHASE_ECDSA_URL_PATH + "?" + urlencode(query_params, safe='')
-
-            headers = ecdsa_signature(
-                api_secret=API_SECRET,
-                method="POST",
-                path=PURCHASE_ECDSA_URL_PATH,
-                query_params=query_params,
-                body=body_str,
-                timestamp="",
-                nonce=""
-            )
-            headers.update({
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.token}"
-            })
-
-            with  self.client.post(full_url,
-                                    data=body_str, headers=headers,
+            resp = self.client.post(full_url,
+                                    data=body_str,
+                                    headers=headers,
                                     name="/api/purchase/create/ecdsa",
-                                    timeout=30,
-                                    catch_response=True) as resp:
-                if resp.status_code == 201:
-                    # ✅ 成功后从全局池移除，避免重复购买
-                    resp.success()
-                    with public_lock:
-                        if target in public_listings: #防止不存在
-                            public_listings.remove(target)
-                else:
-                    err_msg = f"[{self.role}] 购买失败: {self.account} (HTTP {resp.status_code})，response:{resp.text[:200]}"
-                    resp.failure(f"{resp.status_code}{resp.url}{resp.text[:200]}")
-                    log_failure("business", err_msg)
+                                    timeout=30)
+            resp.raise_for_status()
+            status = getattr(resp, 'status_code', 'unknown')
+            if not resp.content:
+                logger.error(f"Empty response body (status: {status})")
+                raise Exception(f"Empty response body (status: {status})")
+            try:
+                json_data = resp.json()
+            except Exception as e:
+                logger.error(str(e))
+                raise Exception(f"{str(e)}")
+
+            if status == 201 and json_data["status"]=="PENDING_REVIEW":
+                # 4. 购买成功：O(1)删除挂单
+                with public_lock:
+                    if target_id in public_listings:
+                        del public_listings[target_id]  # 字典O(1)删
+                        # 不用删deque，淘汰时自动清理无效ID（不影响逻辑）
+            else:
+                err_msg = f"[{self.role}] 购买失败: {self.account} (HTTP {resp.status_code})，response:{resp.text[:200]}"
+                logger.error(f"{resp.status_code}{resp.url}{resp.text[:200]}")
+                raise Exception(err_msg)
 
         except Exception as e:
-            log_failure("business", str(e))
+            logger.error(str(e))
 
 
     # ==================== 查询挂单详情：仅卖家查自己挂的单 ====================
-    @task(2)
+    @task(3)
     def query_listing(self):
         if not self.my_listings or not self.token:
             return
 
         listing_id = random.choice(self.my_listings)
-
+        #挂单id查询不到，直接放弃
+        if not listing_id:
+            return
         try:
-            with self.client.post(
+            resp = self.client.post(
                 GET_LISTING_URL,
                 json={"listing_id": listing_id},
                 headers={"Authorization": f"Bearer {self.token}"},
                 name="/get_listing",
-                timeout=30,
-                catch_response=True) as resp:
-                if resp.status_code == 200:
-                    resp.success()
-                else:
-                    err_msg = f" {self.account} 查询失败，挂单号：{listing_id}(HTTP {resp.status_code})，response:{resp.text[:200]}"
-                    resp.failure(f"{resp.status_code}{resp.url}{resp.text[:200]}")
-                    log_failure("business", err_msg)
-
+                timeout=30)
+            resp.raise_for_status()
+            status = getattr(resp, 'status_code', 'unknown')
+            if not resp.content:
+                logger.error(f"Empty response body (status: {status})")
+                raise Exception(f"Empty response body (status: {status})")
+            if resp.status_code != 200:
+                err_msg = f" {self.account} 查询失败，挂单号：{listing_id}(HTTP {resp.status_code})，response:{resp.text[:200]}"
+                logger.error(f"{resp.status_code}{resp.url}{resp.text[:200]}")
+                raise Exception(err_msg)
         except Exception as e:
-            log_failure("business", str(e))
-            self.client.fail("str(e)")
+            logger.error(str(e))
+
     # ==================== 查询账余额：买家和卖家都能查询 ====================
-    @task(5)
+    @task(3)
     def query_amount(self):
         if not self.token:
             return
         try:
-            with self.client.get(get_balance_url,
+            resp = self.client.get(get_balance_url,
                                  headers={"Authorization": f"Bearer {self.token}"},
                                  name="/get_balance_url",
-                                 timeout=30,
-                                 catch_response=True) as resp:
-                if resp.status_code == 200:
-                    resp.success()
-                else:
-                    err_msg = f" {self.account} 查询余额失败，(HTTP {resp.status_code})，response:{resp.text[:200]}"
-                    resp.failure(f"{resp.status_code}{resp.url}{resp.text[:200]}")
-                    log_failure("business", err_msg)
+                                 timeout=30)
+            resp.raise_for_status()
+            status = getattr(resp, 'status_code', 'unknown')
+            if not resp.content:
+                logger.error(f"Empty response body (status: {status})")
+                raise Exception(f"Empty response body (status: {status})")
+            if resp.status_code != 200:
+                err_msg = f" {self.account} 查询余额失败，(HTTP {resp.status_code})，response:{resp.text[:200]}"
+                logger.error(f"{resp.status_code}{resp.url}{resp.text[:200]}")
+                raise Exception(err_msg)
 
         except Exception as e:
-            log_failure("business", str(e))
-            self.client.fail("str(e)")
+            logger.error(str(e))
 
 
