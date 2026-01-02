@@ -6,7 +6,7 @@ environments:
   dev:
     #用户端接口
     user:
-      base_url: http://127.0.0.1:5000
+      base_url: http://127.0.0.1:5001
       register_url: /api/register
       login_url: /api/login #用户端登陆
       get_balance_url: /api/account/balance

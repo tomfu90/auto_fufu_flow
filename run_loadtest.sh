@@ -1,37 +1,28 @@
 #!/bin/bash
+# 核心配置
+TARGET_USERS=3000
+total_workers=4
 
-# 配置参数
-export TARGET_USERS=3000
-export total_workers=4
+# 仅打印启动的Worker数量
+echo "📌 启动配置：TARGET_USERS=$TARGET_USERS | Worker数量=$total_workers"
 
-echo "🎯 TARGET_USERS=$TARGET_USERS, total_workers=$total_workers"
-
-# 启动 Master
-echo "🚀 启动 Locust Master..."
-locust -f load_test/locustfile.py --master --web-host=0.0.0.0 &
+# 启动Master：传TARGET_USERS，指定IP和5557端口（注意：一行写完或用反斜杠正确换行）
+env TARGET_USERS=$TARGET_USERS locust -f load_test/locustfile.py --master --master-host=localhost --master-port=5557 --web-host=0.0.0.0 --web-port=8089 &
 MASTER_PID=$!
 
-# 启动 Workers
-echo "👷 启动 $total_workers 个 Workers..."
-worker_pids=()  # 创建空数组存储 PID
-
+# 启动Worker：传worker_id和TARGET_USERS，指定Master地址端口
+echo "🚀 开始启动 $total_workers 个Worker进程..."
 for ((i=0; i<total_workers; i++)); do
-    env worker_id=$i locust -f load_test/locustfile.py --worker &
-    worker_pids+=($!)  # 将最新后台进程 PID 加入数组
+    # 关键：env变量和locust命令在同一行，用空格分隔
+    env worker_id=$i TARGET_USERS=$TARGET_USERS locust -f load_test/locustfile.py --worker --master-host=localhost --master-port=5557 &
+    # 等待1秒，避免Worker同时启动导致端口冲突（可选，但更稳定）
+    sleep 1
+    echo "  ✅ Worker $i 已启动"
 done
 
-# 等待 Master 结束（例如压测完成或 Ctrl+C）
+# 等待Master结束，清理Worker
 wait $MASTER_PID
-
-# 清理所有 Workers
-echo "🧹 清理所有 Worker 进程 (${#worker_pids[@]} 个)..."
-for pid in "${worker_pids[@]}"; do
-    kill "$pid" 2>/dev/null
-done
-
-# 可选：等待所有 Worker 退出（避免僵尸进程）
-for pid in "${worker_pids[@]}"; do
-    wait "$pid" 2>/dev/null
-done
-
-echo "✅ 所有进程已退出。"
+echo -e "\n🧹 压测结束，清理所有Worker进程..."
+# 更精准的清理：只杀当前脚本启动的Worker（避免误杀其他locust进程）
+pkill -f "locust -f load_test/locustfile.py --worker" 2>/dev/null
+echo "✅ 所有进程已清理完成"

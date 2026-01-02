@@ -1329,4 +1329,4 @@ if __name__ == '__main__':
         cursor = conn.execute("PRAGMA database_list")
         print("API 使用的数据库路径:", cursor.fetchone()[2])
     init_db()  # 确保数据库表已创建
-    app.run(host='0.0.0.0', port=5000, debug=False,use_reloader=False)
+    app.run(host='0.0.0.0', port=5001, debug=False,use_reloader=False)
