@@ -144,7 +144,7 @@ def logged_user_client(config,test_users):
         token = resp['access_token']
         # 设置全局认证头
         client.session.headers.update({"Authorization": f"Bearer {token}"})
-        client._username = username
+        #client._username = username
         clients[username] = client
 
     return clients
@@ -169,7 +169,7 @@ def logged_back_client(config,test_users):
         token = resp['access_token']
         # 设置全局认证头
         client.session.headers.update({"Authorization": f"Bearer {token}"})
-        client._username = username
+        #client._username = username
         clients[username] = client
 
     return clients
