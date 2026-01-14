@@ -78,7 +78,7 @@ class Apiclient:
             return response
         except requests.exceptions.RequestException as e:
             # 捕获requests请求异常
-            error_msg = f"e.__class__.__name__: {str(e)}"
+            error_msg = f"{e.__class__.__name__}: {str(e)}"
             full_traceback = traceback.format_exc()
             #allure记录异常
             with allure.step(f"请求失败：{req_summary}"):
